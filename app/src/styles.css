@@ -1,1 +1,93 @@
+:root {
+  --green: #2f7a3f;
+  --red: #c0392b;
+  --blue: #2980b9;
+  --ink: #1c2620;
+  --paper: #fafaf7;
+  --border: #dfe3de;
+}
+
 html, body, #root { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+}
+
+.layout {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  padding: 20px;
+  background: var(--paper);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.sidebar h1 { font-size: 1.2rem; margin: 0; }
+.sidebar .subtitle { margin: 2px 0 20px; color: #667; font-size: 0.85rem; }
+.sidebar h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #556; margin: 18px 0 8px; }
+.sidebar .hint { font-size: 0.85rem; color: #556; margin: 4px 0 10px; }
+.sidebar .hint.small { font-size: 0.75rem; }
+
+.layer-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin-bottom: 8px; cursor: pointer; }
+.swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.swatch-tree { background: var(--green); }
+.swatch-permit { background: var(--red); }
+.swatch-report { background: var(--blue); }
+
+.report-btn, .upload-actions button {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: white;
+  cursor: pointer;
+}
+.report-btn { width: 100%; }
+.report-btn:disabled { opacity: 0.7; cursor: default; }
+.upload-actions button.primary, .report-btn {
+  background: var(--green);
+  color: white;
+  border-color: var(--green);
+}
+
+.sidebar-footer { margin-top: 24px; font-size: 0.7rem; color: #889; line-height: 1.4; }
+
+.map-area { position: relative; flex: 1; }
+.map-container { position: absolute; inset: 0; }
+
+.banner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  z-index: 5;
+}
+.banner.success { background: var(--green); }
+
+.upload-panel {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(340px, 90vw);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  z-index: 5;
+}
+.upload-panel h2 { font-size: 1rem; margin: 0 0 4px; }
+.upload-panel input[type="file"] { display: block; margin: 10px 0; font-size: 0.85rem; }
+.upload-panel textarea { width: 100%; min-height: 60px; box-sizing: border-box; font: inherit; padding: 6px; border-radius: 6px; border: 1px solid var(--border); }
+.upload-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.error { color: var(--red); font-size: 0.8rem; }
