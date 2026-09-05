@@ -55,9 +55,112 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
 }
 
-function treePopupHtml(t: Tree): string {
+// --- Species lookup (Wikidata) ------------------------------------------
+//
+// openbomenkaart.org ships its own hand-curated 469KB taxon-name file to
+// get English/Dutch common names + Wikipedia links per species. That file
+// is the site author's own substantial curated dataset, so rather than
+// copy it, this looks the same information up live from Wikidata, which
+// carries labels in many languages plus sitelinks to each language's
+// Wikipedia for most tree species. Verified live (in-browser) against the
+// Delft dataset's own "Tilia platyphyllos" example before wiring this in.
+
+interface SpeciesInfo {
+  en: string | null
+  nl: string | null
+  enUrl: string | null
+  nlUrl: string | null
+}
+
+const speciesInfoCache = new Map<string, Promise<SpeciesInfo | null>>()
+
+// Delft's own species field carries a cultivar suffix sometimes, e.g.
+// `Tilia platyphyllos 'Delft'` - Wikidata indexes the species itself, not
+// the cultivar, so strip anything from the first quote mark onward.
+function stripCultivar(name: string): string {
+  return name.split(/['"‘’“”]/)[0].trim()
+}
+
+function wikipediaUrlFor(lang: 'en' | 'nl', title: string): string {
+  return `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`
+}
+
+async function lookupSpeciesInfo(rawName: string): Promise<SpeciesInfo | null> {
+  const name = stripCultivar(rawName)
+  if (!name) return null
+
+  const cached = speciesInfoCache.get(name)
+  if (cached) return cached
+
+  const promise = (async (): Promise<SpeciesInfo | null> => {
+    try {
+      // Step 1: find the Wikidata item for this scientific name.
+      const searchUrl =
+        `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(name)}` +
+        `&language=en&type=item&limit=1&format=json&origin=*`
+      const searchRes = await fetch(searchUrl)
+      if (!searchRes.ok) return null
+      const searchData = (await searchRes.json()) as any
+      const id: string | undefined = searchData?.search?.[0]?.id
+      if (!id) return null
+
+      // Step 2: pull English/Dutch labels + Wikipedia sitelinks for it.
+      const entityUrl =
+        `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${id}` +
+        `&props=labels|sitelinks&languages=en|nl&sitefilter=enwiki|nlwiki&format=json&origin=*`
+      const entityRes = await fetch(entityUrl)
+      if (!entityRes.ok) return null
+      const entityData = (await entityRes.json()) as any
+      const entity = entityData?.entities?.[id]
+      if (!entity) return null
+
+      const enLabel: string | null = entity.labels?.en?.value ?? null
+      const nlLabel: string | null = entity.labels?.nl?.value ?? null
+      const enTitle: string | null = entity.sitelinks?.enwiki?.title ?? null
+      const nlTitle: string | null = entity.sitelinks?.nlwiki?.title ?? null
+
+      // Wikidata's label for a tree species is often just the scientific
+      // name again (no distinct common name on record) - don't show that
+      // as if it were an English/Dutch common name.
+      const isRedundant = (label: string | null) => !label || label.toLowerCase() === name.toLowerCase()
+
+      return {
+        en: isRedundant(enLabel) ? null : enLabel,
+        nl: isRedundant(nlLabel) ? null : nlLabel,
+        enUrl: enTitle ? wikipediaUrlFor('en', enTitle) : null,
+        nlUrl: nlTitle ? wikipediaUrlFor('nl', nlTitle) : null,
+      }
+    } catch {
+      return null
+    }
+  })()
+
+  speciesInfoCache.set(name, promise)
+  return promise
+}
+
+function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean): string {
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+
+  const commonNameRows = info
+    ? [
+        info.en ? row('English name', info.en) : '',
+        info.nl ? row('Dutch name', info.nl) : '',
+      ].join('')
+    : ''
+
+  const wikiLinks =
+    info && (info.enUrl || info.nlUrl)
+      ? `<p class="tree-popup-wiki">${[
+          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (EN)</a>` : '',
+          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (NL)</a>` : '',
+        ]
+          .filter(Boolean)
+          .join(' &middot; ')}</p>`
+      : loadingInfo
+        ? `<p class="tree-popup-wiki tree-popup-loading">Looking up species&hellip;</p>`
+        : ''
 
   return `
     <div class="tree-popup">
@@ -68,7 +171,9 @@ function treePopupHtml(t: Tree): string {
       ${row('Neighborhood', t.neighborhood)}
       ${row('Site', t.site_type)}
       ${row('Managed as', t.management_group)}
+      ${commonNameRows}
       ${t.notes ? `<p class="tree-popup-notes">${escapeHtml(t.notes)}</p>` : ''}
+      ${wikiLinks}
     </div>
   `
 }
@@ -170,10 +275,21 @@ export default function TreeMap({
     map.on('click', 'trees-circle', (e) => {
       const feature = e.features?.[0]
       if (!feature || feature.geometry.type !== 'Point') return
-      new maplibregl.Popup()
+      const tree = feature.properties as Tree
+      const popup = new maplibregl.Popup()
         .setLngLat(feature.geometry.coordinates as [number, number])
-        .setHTML(treePopupHtml(feature.properties as Tree))
+        .setHTML(treePopupHtml(tree, null, !!tree.species_nl))
         .addTo(map)
+
+      // Show what we already have instantly, then fill in the English/Dutch
+      // common names + Wikipedia links once the Wikidata lookup resolves -
+      // no reason to make the click wait on a network round-trip.
+      if (tree.species_nl) {
+        lookupSpeciesInfo(tree.species_nl).then((info) => {
+          if (!popup.isOpen()) return
+          popup.setHTML(treePopupHtml(tree, info, false))
+        })
+      }
     })
   }, [trees, mapLoaded])
 
