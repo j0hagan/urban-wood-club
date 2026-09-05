@@ -14,14 +14,39 @@ export async function syncDelftTrees(env: Env): Promise<number> {
     const chunk = trees.slice(i, i + BATCH_SIZE)
     const stmts = chunk.map((t) =>
       env.DB.prepare(
-        `INSERT INTO trees (id, lat, lon, species_nl, species_lat, is_monumental, source, source_ref, updated_at)
-         VALUES (?, ?, ?, ?, NULL, 0, 'delft-gemeente', ?, ?)
+        `INSERT INTO trees (
+           id, lat, lon, species_nl, species_lat, is_monumental,
+           planted_year, height_class, diameter_cm, neighborhood, site_type, management_group, notes,
+           source, source_ref, updated_at
+         )
+         VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, 'delft-gemeente', ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            lat = excluded.lat,
            lon = excluded.lon,
            species_nl = excluded.species_nl,
+           planted_year = excluded.planted_year,
+           height_class = excluded.height_class,
+           diameter_cm = excluded.diameter_cm,
+           neighborhood = excluded.neighborhood,
+           site_type = excluded.site_type,
+           management_group = excluded.management_group,
+           notes = excluded.notes,
            updated_at = excluded.updated_at`
-      ).bind(t.id, t.lat, t.lon, t.speciesNl, t.sourceRef, now)
+      ).bind(
+        t.id,
+        t.lat,
+        t.lon,
+        t.speciesNl,
+        t.plantedYear,
+        t.heightClass,
+        t.diameterCm,
+        t.neighborhood,
+        t.siteType,
+        t.managementGroup,
+        t.notes,
+        t.sourceRef,
+        now
+      )
     )
     await env.DB.batch(stmts)
   }

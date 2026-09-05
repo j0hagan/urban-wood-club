@@ -270,3 +270,29 @@ body {
 .wizard-actions button { flex: 1; }
 .submit-note { text-align: center; padding: 0 16px 14px; margin: 0; }
 .error { color: var(--red); font-size: 0.8rem; }
+
+/* MapLibre popups: the tree spec-sheet popup (click a tree dot) */
+.maplibregl-popup-content {
+  font-family: "Inter", sans-serif;
+  padding: 12px 14px;
+  border-radius: 6px;
+}
+.tree-popup { min-width: 180px; }
+.tree-popup h3 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  margin: 0 0 8px;
+}
+.tree-popup h3 em { font-style: normal; color: var(--yellow); font-size: 0.75rem; }
+.tree-popup-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.78rem;
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+}
+.tree-popup-row:first-of-type { border-top: none; }
+.tree-popup-row span { color: #6b6355; }
+.tree-popup-notes { font-size: 0.78rem; margin: 8px 0 0; color: #55503f; }

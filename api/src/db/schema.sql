@@ -5,7 +5,14 @@ CREATE TABLE IF NOT EXISTS trees (
   lon REAL NOT NULL,
   species_nl TEXT,
   species_lat TEXT,
-  is_monumental INTEGER DEFAULT 0,
+  is_monumental INTEGER DEFAULT 0,       -- not populated by any known source field yet - stays 0
+  planted_year INTEGER,                  -- AANLEGJAAR
+  height_class TEXT,                     -- HOOGTE - a band like "9-12 m.", not a raw number
+  diameter_cm REAL,                      -- DIAMETER
+  neighborhood TEXT,                     -- BUURT
+  site_type TEXT,                        -- STANDPLAATS (e.g. "Boomspiegel" / tree pit)
+  management_group TEXT,                 -- BEHEERGROEP
+  notes TEXT,                            -- EXTRA_INFORMATIE_2 + _3, when present
   source TEXT NOT NULL,        -- 'delft-gemeente' | 'osm'
   source_ref TEXT,              -- original id/object id at the source
   updated_at TEXT NOT NULL

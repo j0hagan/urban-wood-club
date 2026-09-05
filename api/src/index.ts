@@ -14,7 +14,9 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 // Tier 1 + 1b
 app.get('/api/trees', async (c) => {
   const { results } = await c.env.DB.prepare(
-    'SELECT id, lat, lon, species_nl, species_lat, source, is_monumental FROM trees LIMIT 5000'
+    `SELECT id, lat, lon, species_nl, species_lat, source, is_monumental,
+            planted_year, height_class, diameter_cm, neighborhood, site_type, management_group, notes
+     FROM trees LIMIT 40000`
   ).all()
   return c.json(results)
 })
