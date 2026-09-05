@@ -1,5 +1,20 @@
 type Layers = { trees: boolean; permits: boolean; uploads: boolean }
 
+// A small ink-line twig mark - nods to the hand-drawn tree illustration in
+// the project's research poster without reusing that actual artwork.
+function TwigMark() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none" aria-hidden="true">
+      <path
+        d="M13 24V6M13 6C9 6 7 3 7 1M13 6C17 6 19 3 19 1M9 12C6.5 12 5 10.5 5 9M17 12C19.5 12 21 10.5 21 9"
+        stroke="#17130f"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 export default function Sidebar({
   layers,
   onToggle,
@@ -13,7 +28,10 @@ export default function Sidebar({
 }) {
   return (
     <aside className="sidebar">
-      <h1>Urban Wood Club</h1>
+      <div className="brand">
+        <TwigMark />
+        <h1>Urban Wood Club</h1>
+      </div>
       <p className="subtitle">Delft — tree tracker (trial)</p>
 
       <section>

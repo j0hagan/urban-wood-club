@@ -1,16 +1,30 @@
+/*
+  Palette + type collated from three references:
+  - the WOODSTOCK/TU Delft poster: paper-white ground, ink line art, a red
+    dashed "look here" annotation mark, and a mustard-yellow highlighter
+  - the old urbanwood.club prototype: status-coded map pins (kept the
+    concept, reassigned colors below) and a light CARTO basemap (kept as-is)
+  - pigeon-hole.cargo.site: serif display wordmark, hairline rules,
+    generous whitespace, black-on-white restraint
+
+  Marker colors are hardcoded to match in components/TreeMap.tsx (maplibre
+  markers take a color prop, not CSS) - keep the two in sync by hand.
+*/
 :root {
-  --green: #2f7a3f;
-  --red: #c0392b;
-  --blue: #2980b9;
-  --ink: #1c2620;
-  --paper: #fafaf7;
-  --border: #dfe3de;
+  --ink: #17130f;
+  --paper: #fbfaf5;
+  --paper-dim: #f3efe4;
+  --line: #ddd6c4;
+  --green: #3f6b46;   /* existing trees */
+  --yellow: #e2b93d;  /* planned felling - mirrors the poster's highlighter */
+  --red: #c33a26;     /* community reports - mirrors the poster's dashed-line annotation */
 }
 
 html, body, #root { height: 100%; margin: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: var(--ink);
+  background: var(--paper);
 }
 
 .layout {
@@ -19,56 +33,101 @@ body {
 }
 
 .sidebar {
-  width: 300px;
+  width: 320px;
   flex-shrink: 0;
-  padding: 20px;
+  padding: 28px 24px;
   background: var(--paper);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--line);
   overflow-y: auto;
 }
-.sidebar h1 { font-size: 1.2rem; margin: 0; }
-.sidebar .subtitle { margin: 2px 0 20px; color: #667; font-size: 0.85rem; }
-.sidebar h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #556; margin: 18px 0 8px; }
-.sidebar .hint { font-size: 0.85rem; color: #556; margin: 4px 0 10px; }
-.sidebar .hint.small { font-size: 0.75rem; }
 
-.layer-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; margin-bottom: 8px; cursor: pointer; }
-.swatch { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 2px;
+}
+.brand svg { flex-shrink: 0; }
+.sidebar h1 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 1.5rem;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.sidebar .subtitle {
+  margin: 6px 0 22px;
+  color: #6b6355;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.sidebar h2 {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin: 22px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.sidebar section:first-of-type h2 { margin-top: 22px; }
+.sidebar .hint { font-size: 0.85rem; color: #55503f; margin: 4px 0 12px; line-height: 1.45; }
+.sidebar .hint.small { font-size: 0.72rem; color: #83795f; }
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.9rem;
+  margin-bottom: 9px;
+  cursor: pointer;
+}
+.swatch { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
 .swatch-tree { background: var(--green); }
-.swatch-permit { background: var(--red); }
-.swatch-report { background: var(--blue); }
+.swatch-permit { background: var(--yellow); }
+.swatch-report { background: var(--red); }
 
 .report-btn, .upload-actions button {
   font: inherit;
-  padding: 8px 14px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: white;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
   cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.report-btn { width: 100%; }
+.report-btn { width: 100%; background: var(--ink); color: var(--paper); }
+.report-btn:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
 .report-btn:disabled { opacity: 0.7; cursor: default; }
-.upload-actions button.primary, .report-btn {
-  background: var(--green);
-  color: white;
-  border-color: var(--green);
-}
+.upload-actions button.primary { background: var(--ink); color: var(--paper); }
+.upload-actions button.primary:hover { background: var(--red); border-color: var(--red); }
+.upload-actions button:not(.primary):hover { background: var(--paper-dim); }
 
-.sidebar-footer { margin-top: 24px; font-size: 0.7rem; color: #889; line-height: 1.4; }
+.sidebar-footer {
+  margin-top: 26px;
+  font-size: 0.7rem;
+  color: #8b8267;
+  line-height: 1.5;
+}
 
 .map-area { position: relative; flex: 1; }
 .map-container { position: absolute; inset: 0; }
 
 .banner {
   position: absolute;
-  top: 16px;
+  top: 18px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--ink);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 0.85rem;
+  color: var(--paper);
+  padding: 9px 18px;
+  border-radius: 3px;
+  font-size: 0.82rem;
   z-index: 5;
 }
 .banner.success { background: var(--green); }
@@ -79,15 +138,33 @@ body {
   left: 50%;
   transform: translateX(-50%);
   width: min(340px, 90vw);
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 16px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(23, 19, 15, 0.18);
   z-index: 5;
 }
-.upload-panel h2 { font-size: 1rem; margin: 0 0 4px; }
-.upload-panel input[type="file"] { display: block; margin: 10px 0; font-size: 0.85rem; }
-.upload-panel textarea { width: 100%; min-height: 60px; box-sizing: border-box; font: inherit; padding: 6px; border-radius: 6px; border: 1px solid var(--border); }
-.upload-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.upload-panel h2 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-style: italic;
+  font-size: 1.1rem;
+  margin: 0 0 4px;
+  border: none;
+  padding: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.upload-panel input[type="file"] { display: block; margin: 12px 0; font-size: 0.82rem; }
+.upload-panel textarea {
+  width: 100%;
+  min-height: 60px;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--paper-dim);
+}
+.upload-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .error { color: var(--red); font-size: 0.8rem; }

@@ -71,7 +71,7 @@ export default function TreeMap({
 
     if (layers.trees) {
       trees.forEach((t) => {
-        const marker = new maplibregl.Marker({ color: '#2f7a3f' })
+        const marker = new maplibregl.Marker({ color: '#3f6b46' }) // trees - keep in sync with --green in styles.css
           .setLngLat([t.lon, t.lat])
           .setPopup(new maplibregl.Popup().setText(t.species_nl ?? 'Tree'))
           .addTo(map)
@@ -81,7 +81,7 @@ export default function TreeMap({
 
     if (layers.permits) {
       permits.forEach((p) => {
-        const marker = new maplibregl.Marker({ color: '#c0392b' })
+        const marker = new maplibregl.Marker({ color: '#e2b93d' }) // planned felling - keep in sync with --yellow in styles.css
           .setLngLat([p.lon, p.lat])
           .setPopup(new maplibregl.Popup().setText(`${p.title} (${p.status})`))
           .addTo(map)
@@ -102,7 +102,7 @@ export default function TreeMap({
           p.textContent = u.note
           popupNode.appendChild(p)
         }
-        const marker = new maplibregl.Marker({ color: '#2980b9' })
+        const marker = new maplibregl.Marker({ color: '#c33a26' }) // community reports - keep in sync with --red in styles.css
           .setLngLat([u.lon, u.lat])
           .setPopup(new maplibregl.Popup().setDOMContent(popupNode))
           .addTo(map)
