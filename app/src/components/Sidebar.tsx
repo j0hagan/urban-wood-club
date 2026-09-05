@@ -1,4 +1,4 @@
-type Layers = { trees: boolean; permits: boolean; uploads: boolean }
+type Layers = { trees: boolean; permits: boolean; reports: boolean }
 
 // A small ink-line twig mark - nods to the hand-drawn tree illustration in
 // the project's research poster without reusing that actual artwork.
@@ -45,7 +45,7 @@ export default function Sidebar({
           <span className="swatch swatch-permit" /> Planned felling
         </label>
         <label className="layer-row">
-          <input type="checkbox" checked={layers.uploads} onChange={() => onToggle('uploads')} />
+          <input type="checkbox" checked={layers.reports} onChange={() => onToggle('reports')} />
           <span className="swatch swatch-report" /> Community reports
         </label>
       </section>

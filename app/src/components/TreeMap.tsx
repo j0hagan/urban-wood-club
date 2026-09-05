@@ -6,9 +6,23 @@ const DELFT_CENTER: [number, number] = [4.3571, 52.0116]
 
 type Tree = { id: string; lat: number; lon: number; species_nl?: string; is_monumental?: number }
 type Permit = { id: string; lat: number; lon: number; title: string; status: string }
-type Upload = { id: string; lat: number; lon: number; note?: string; photo_url: string }
+type Report = {
+  id: string
+  lat: number
+  lon: number
+  status: 'marked_for_felling' | 'felled' | 'new_tree_planted'
+  species_name?: string
+  notes?: string
+  photo_url: string
+}
 
-type Layers = { trees: boolean; permits: boolean; uploads: boolean }
+type Layers = { trees: boolean; permits: boolean; reports: boolean }
+
+const STATUS_LABEL: Record<Report['status'], string> = {
+  marked_for_felling: 'Marked for felling',
+  felled: 'Already felled',
+  new_tree_planted: 'New tree planted',
+}
 
 export default function TreeMap({
   layers,
@@ -26,7 +40,7 @@ export default function TreeMap({
   const markersRef = useRef<maplibregl.Marker[]>([])
   const [trees, setTrees] = useState<Tree[]>([])
   const [permits, setPermits] = useState<Permit[]>([])
-  const [uploads, setUploads] = useState<Upload[]>([])
+  const [reports, setReports] = useState<Report[]>([])
 
   // map init (once)
   useEffect(() => {
@@ -59,7 +73,7 @@ export default function TreeMap({
   useEffect(() => {
     fetch('/api/trees').then((r) => r.json()).then(setTrees).catch(() => setTrees([]))
     fetch('/api/permits').then((r) => r.json()).then(setPermits).catch(() => setPermits([]))
-    fetch('/api/uploads').then((r) => r.json()).then(setUploads).catch(() => setUploads([]))
+    fetch('/api/reports').then((r) => r.json()).then(setReports).catch(() => setReports([]))
   }, [refreshKey])
 
   // (re)draw markers whenever data or layer visibility changes
@@ -89,27 +103,30 @@ export default function TreeMap({
       })
     }
 
-    if (layers.uploads) {
-      uploads.forEach((u) => {
+    if (layers.reports) {
+      reports.forEach((r) => {
         const popupNode = document.createElement('div')
         const img = document.createElement('img')
-        img.src = u.photo_url
+        img.src = r.photo_url
         img.style.maxWidth = '200px'
         img.style.display = 'block'
         popupNode.appendChild(img)
-        if (u.note) {
-          const p = document.createElement('p')
-          p.textContent = u.note
-          popupNode.appendChild(p)
+        const label = document.createElement('p')
+        label.innerHTML = `<strong>${STATUS_LABEL[r.status]}</strong>${r.species_name ? ` — ${r.species_name}` : ''}`
+        popupNode.appendChild(label)
+        if (r.notes) {
+          const note = document.createElement('p')
+          note.textContent = r.notes
+          popupNode.appendChild(note)
         }
         const marker = new maplibregl.Marker({ color: '#c33a26' }) // community reports - keep in sync with --red in styles.css
-          .setLngLat([u.lon, u.lat])
+          .setLngLat([r.lon, r.lat])
           .setPopup(new maplibregl.Popup().setDOMContent(popupNode))
           .addTo(map)
         markersRef.current.push(marker)
       })
     }
-  }, [trees, permits, uploads, layers])
+  }, [trees, permits, reports, layers])
 
   return <div ref={containerRef} className="map-container" />
 }
