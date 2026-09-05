@@ -1,0 +1,16 @@
+{
+  "name": "urban-wood-club-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "urban-wood-club", "database_id": "REPLACE_ME_AFTER_wrangler_d1_create" }
+  ],
+  "r2_buckets": [
+    { "binding": "PHOTOS", "bucket_name": "urban-wood-club-photos" }
+  ],
+  "triggers": {
+    // daily at 03:00 UTC — permit announcements don't need tighter polling
+    "crons": ["0 3 * * *"]
+  }
+}
