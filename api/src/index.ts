@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { runDailyIngestion } from './ingest/run'
+import { runDailyIngestion, syncDelftTrees, syncFellingPermits } from './ingest/run'
 
 export interface Env {
   DB: D1Database
@@ -180,6 +180,31 @@ app.post('/api/admin/permits/:id/review', async (c) => {
     .bind(status, c.req.param('id'))
     .run()
   return c.json({ ok: true })
+})
+
+// Manual sync triggers - Cron Triggers can't be fired on demand from
+// `wrangler dev`, so these make Tier 1/2 testable locally without waiting
+// for the daily schedule. Same admin auth as the review endpoints.
+app.post('/api/admin/sync/trees', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  try {
+    const count = await syncDelftTrees(c.env)
+    return c.json({ ok: true, synced: count })
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'sync failed' }, 500)
+  }
+})
+
+app.post('/api/admin/sync/permits', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  try {
+    const count = await syncFellingPermits(c.env)
+    return c.json({ ok: true, fetched: count })
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'sync failed' }, 500)
+  }
 })
 
 export default {

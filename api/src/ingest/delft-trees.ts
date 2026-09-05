@@ -1,36 +1,58 @@
 // Tier 1 ingestion: Delft's own managed-tree dataset ("Bomen in beheer door
-// gemeente Delft"), published as open GIS data on an Esri ArcGIS Hub site.
+// gemeente Delft"), pulled through the ArcGIS Hub v3 downloads API - the
+// same endpoint the dataset page's own "Download > GeoJSON" button
+// resolves to. Confirmed live (Sept 2026): returns real tree records with
+// fields including BOOMSORTIMENT (species/cultivar), AANLEGJAAR (year
+// planted), BUURT/WIJK (neighborhood/district).
 //
 // Dataset page: https://data.delft.nl/datasets/d83a50486b384bfe8038c2d762f5e628_0
+// Item id used below: d83a50486b384bfe8038c2d762f5e628_0
 //
-// Esri Hub dataset pages expose a standard ArcGIS REST FeatureServer/query
-// endpoint. Grab the exact URL from that page's "API" / "View API Resource"
-// link (it wasn't extractable from a plain page fetch during research) -
-// it'll look like:
-//   https://services.arcgis.com/<org>/arcgis/rest/services/<layer>/FeatureServer/0
-// Once you have it, paste it in as FEATURE_SERVER_QUERY_URL below.
+// NOT resolved yet: no field was confirmed for "monumental tree" status,
+// even though the dataset's own description mentions monumental trees are
+// identified in it - is_monumental is left at 0 until the full field list
+// is checked against a monumental-flagged record. BOOMSTATUS may carry a
+// felled/removed state worth cross-referencing against Tier 2/3 data
+// later - not used yet, don't assume its values without checking a live
+// sample first.
 
-const FEATURE_SERVER_QUERY_URL = '' // TODO: fill in from the dataset's API link
+const DOWNLOAD_URL =
+  'https://hub.arcgis.com/api/v3/datasets/d83a50486b384bfe8038c2d762f5e628_0/downloads/data?format=geojson&spatialRefId=4326&where=1%3D1'
 
-export async function fetchDelftManagedTrees() {
-  if (!FEATURE_SERVER_QUERY_URL) {
-    throw new Error('FEATURE_SERVER_QUERY_URL not set - see comment at top of this file')
-  }
-  const results: any[] = []
-  let offset = 0
-  const pageSize = 2000
-  for (;;) {
-    const url =
-      `${FEATURE_SERVER_QUERY_URL}/query?where=1%3D1&outFields=*&f=geojson` +
-      `&resultOffset=${offset}&resultRecordCount=${pageSize}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`ArcGIS query failed: ${res.status}`)
-    const geojson = await res.json<{ features: any[] }>()
-    results.push(...geojson.features)
-    if (geojson.features.length < pageSize) break
-    offset += pageSize
-  }
-  return results
+export interface DelftTreeRecord {
+  id: string
+  lat: number
+  lon: number
+  speciesNl: string | null
+  sourceRef: string
+}
+
+interface GeoJsonTreeResponse {
+  features: Array<{
+    geometry: { coordinates: [number, number] } | null
+    properties: Record<string, unknown>
+  }>
+}
+
+export async function fetchDelftManagedTrees(): Promise<DelftTreeRecord[]> {
+  const res = await fetch(DOWNLOAD_URL)
+  if (!res.ok) throw new Error(`ArcGIS Hub download failed: ${res.status} ${res.statusText}`)
+  const geojson = await res.json<GeoJsonTreeResponse>()
+
+  return geojson.features
+    .filter((f) => f.geometry?.coordinates?.length === 2)
+    .map((f) => {
+      const props = f.properties
+      const ref = String(props.ID ?? props.OBJECTID)
+      const [lon, lat] = f.geometry!.coordinates
+      return {
+        id: `delft-${ref}`,
+        lat,
+        lon,
+        speciesNl: typeof props.BOOMSORTIMENT === 'string' ? props.BOOMSORTIMENT : null,
+        sourceRef: ref,
+      }
+    })
 }
 
 // Tier 1b (complementary/cross-check): OpenStreetMap tree tags via
@@ -48,5 +70,5 @@ export async function fetchDelftOsmTrees() {
   `
   const res = await fetch(OVERPASS_ENDPOINT, { method: 'POST', body: query })
   if (!res.ok) throw new Error(`Overpass query failed: ${res.status}`)
-  return res.json<{ elements: any[] }>()
+  return res.json<{ elements: unknown[] }>()
 }
