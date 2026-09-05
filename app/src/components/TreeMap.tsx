@@ -61,9 +61,14 @@ function escapeHtml(value: string): string {
 // get English/Dutch common names + Wikipedia links per species. That file
 // is the site author's own substantial curated dataset, so rather than
 // copy it, this looks the same information up live from Wikidata, which
-// carries labels in many languages plus sitelinks to each language's
-// Wikipedia for most tree species. Verified live (in-browser) against the
-// Delft dataset's own "Tilia platyphyllos" example before wiring this in.
+// carries sitelinks to each language's Wikipedia for most tree species,
+// plus (for many) a "taxon common name" (P1843) statement per language -
+// the property Wikidata actually uses for vernacular names. (An earlier
+// version of this read the item's plain label instead, but Wikidata's own
+// convention keeps a taxon's label as the scientific name in every
+// language, so that almost always came back empty - P1843 is the fix.)
+// Falls back to the Wikipedia article's own title when P1843 has nothing
+// but the title itself differs from the scientific name.
 
 interface SpeciesInfo {
   en: string | null
@@ -104,29 +109,40 @@ async function lookupSpeciesInfo(rawName: string): Promise<SpeciesInfo | null> {
       const id: string | undefined = searchData?.search?.[0]?.id
       if (!id) return null
 
-      // Step 2: pull English/Dutch labels + Wikipedia sitelinks for it.
+      // Step 2: pull the taxon common name (P1843) + Wikipedia sitelinks.
       const entityUrl =
         `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${id}` +
-        `&props=labels|sitelinks&languages=en|nl&sitefilter=enwiki|nlwiki&format=json&origin=*`
+        `&props=claims|sitelinks&sitefilter=enwiki|nlwiki&format=json&origin=*`
       const entityRes = await fetch(entityUrl)
       if (!entityRes.ok) return null
       const entityData = (await entityRes.json()) as any
       const entity = entityData?.entities?.[id]
       if (!entity) return null
 
-      const enLabel: string | null = entity.labels?.en?.value ?? null
-      const nlLabel: string | null = entity.labels?.nl?.value ?? null
       const enTitle: string | null = entity.sitelinks?.enwiki?.title ?? null
       const nlTitle: string | null = entity.sitelinks?.nlwiki?.title ?? null
 
-      // Wikidata's label for a tree species is often just the scientific
-      // name again (no distinct common name on record) - don't show that
-      // as if it were an English/Dutch common name.
-      const isRedundant = (label: string | null) => !label || label.toLowerCase() === name.toLowerCase()
+      // P1843 ("taxon common name") holds one monolingual-text value per
+      // vernacular name Wikidata has on record for this species.
+      let commonNameEn: string | null = null
+      let commonNameNl: string | null = null
+      const commonNameClaims: any[] = entity.claims?.P1843 ?? []
+      for (const claim of commonNameClaims) {
+        const value = claim?.mainsnak?.datavalue?.value
+        if (!value || typeof value.text !== 'string') continue
+        if (value.language === 'en' && !commonNameEn) commonNameEn = value.text
+        if (value.language === 'nl' && !commonNameNl) commonNameNl = value.text
+      }
+
+      // If Wikidata has no P1843 common name in a language, but that
+      // language's Wikipedia article is titled something other than the
+      // plain scientific name, show that title instead of nothing.
+      const titleIfDistinct = (title: string | null) =>
+        title && title.toLowerCase() !== name.toLowerCase() ? title : null
 
       return {
-        en: isRedundant(enLabel) ? null : enLabel,
-        nl: isRedundant(nlLabel) ? null : nlLabel,
+        en: commonNameEn ?? titleIfDistinct(enTitle),
+        nl: commonNameNl ?? titleIfDistinct(nlTitle),
         enUrl: enTitle ? wikipediaUrlFor('en', enTitle) : null,
         nlUrl: nlTitle ? wikipediaUrlFor('nl', nlTitle) : null,
       }
@@ -155,8 +171,8 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
     ? 'Looking up&hellip;'
     : info && (info.enUrl || info.nlUrl)
       ? [
-          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">EN</a>` : '',
-          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">NL</a>` : '',
+          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (EN)</a>` : '',
+          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (NL)</a>` : '',
         ]
           .filter(Boolean)
           .join(' &middot; ')
@@ -174,7 +190,7 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
       ${row('Diameter', t.diameter_cm != null ? `${t.diameter_cm} cm` : null)}
       ${row('Neighborhood', t.neighborhood)}
       ${row('Coordinates', coordinates)}
-      ${rawRow('Wikipedia Links', wikiHtml)}
+      ${rawRow('More info on species', wikiHtml)}
     </div>
   `
 }
