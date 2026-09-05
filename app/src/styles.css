@@ -295,24 +295,12 @@ body {
 }
 .tree-popup-row:first-of-type { border-top: none; }
 .tree-popup-row span { color: #6b6355; }
-.tree-popup-notes { font-size: 0.78rem; margin: 8px 0 0; color: #55503f; }
 
-/* English/Dutch common-name rows (via Wikidata) reuse .tree-popup-row
-   above; this is just the Wikipedia-links line underneath. */
-.tree-popup-wiki {
-  font-size: 0.76rem;
-  margin: 8px 0 0;
-  padding-top: 6px;
-  border-top: 1px solid var(--line);
-}
-.tree-popup-wiki a {
+/* The Wikipedia Links row's value holds actual <a> tags (via Wikidata),
+   not escaped text like the other rows - style those links here. */
+.tree-popup-row strong a {
   color: var(--red);
   text-decoration: none;
   font-weight: 600;
 }
-.tree-popup-wiki a:hover { text-decoration: underline; }
-.tree-popup-wiki.tree-popup-loading {
-  color: #8b8267;
-  font-style: italic;
-  font-weight: 400;
-}
+.tree-popup-row strong a:hover { text-decoration: underline; }

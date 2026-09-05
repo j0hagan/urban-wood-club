@@ -139,41 +139,42 @@ async function lookupSpeciesInfo(rawName: string): Promise<SpeciesInfo | null> {
   return promise
 }
 
+// The popup shows a fixed field list (species header, English/Dutch common
+// name, planted year, height, diameter, neighborhood, coordinates,
+// Wikipedia links) - deliberately not every column the API returns, to
+// match the compact spec-sheet layout openbomenkaart.org uses.
 function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean): string {
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+  const rawRow = (label: string, html: string) => `<div class="tree-popup-row"><span>${label}</span><strong>${html}</strong></div>`
 
-  const commonNameRows = info
-    ? [
-        info.en ? row('English name', info.en) : '',
-        info.nl ? row('Dutch name', info.nl) : '',
-      ].join('')
-    : ''
+  const englishValue = loadingInfo ? '…' : (info?.en ?? null)
+  const dutchValue = loadingInfo ? '…' : (info?.nl ?? null)
 
-  const wikiLinks =
-    info && (info.enUrl || info.nlUrl)
-      ? `<p class="tree-popup-wiki">${[
-          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (EN)</a>` : '',
-          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (NL)</a>` : '',
+  const wikiHtml = loadingInfo
+    ? 'Looking up&hellip;'
+    : info && (info.enUrl || info.nlUrl)
+      ? [
+          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">EN</a>` : '',
+          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">NL</a>` : '',
         ]
           .filter(Boolean)
-          .join(' &middot; ')}</p>`
-      : loadingInfo
-        ? `<p class="tree-popup-wiki tree-popup-loading">Looking up species&hellip;</p>`
-        : ''
+          .join(' &middot; ')
+      : '—'
+
+  const coordinates = `${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}`
 
   return `
     <div class="tree-popup">
-      <h3>${t.species_nl ? escapeHtml(t.species_nl) : 'Unspecified species'}${t.is_monumental ? ' <em>(monumental)</em>' : ''}</h3>
+      <h3>${t.species_nl ? escapeHtml(t.species_nl) : 'Unspecified species'}</h3>
+      ${row('English name', englishValue)}
+      ${row('Dutch name', dutchValue)}
       ${row('Planted', t.planted_year)}
       ${row('Height', t.height_class)}
       ${row('Diameter', t.diameter_cm != null ? `${t.diameter_cm} cm` : null)}
       ${row('Neighborhood', t.neighborhood)}
-      ${row('Site', t.site_type)}
-      ${row('Managed as', t.management_group)}
-      ${commonNameRows}
-      ${t.notes ? `<p class="tree-popup-notes">${escapeHtml(t.notes)}</p>` : ''}
-      ${wikiLinks}
+      ${row('Coordinates', coordinates)}
+      ${rawRow('Wikipedia Links', wikiHtml)}
     </div>
   `
 }
