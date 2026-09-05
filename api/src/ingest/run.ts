@@ -53,8 +53,14 @@ export async function syncDelftTrees(env: Env): Promise<number> {
   return trees.length
 }
 
-// Tier 2: pull new Delft felling-permit announcements from the national
-// bekendmakingen feed since the last run, insert as 'pending' review.
+// Tier 2: pull new/updated Delft felling-permit announcements from the
+// national bekendmakingen feed since the last run, upsert on
+// publication_id. review_status is left untouched on an existing row
+// (DO NOTHING would apply to the whole row) so a human's approve/reject
+// decision is never clobbered by a later re-sync - but the rest of the
+// record (status, address, lat/lon, tree count, species hint) is
+// refreshed, since e.g. a permit's status legitimately moves from
+// "aangevraagd" to "verleend" as it works through the process.
 export async function syncFellingPermits(env: Env): Promise<number> {
   const lastRun = await env.DB.prepare(
     `SELECT value FROM ingestion_state WHERE key = 'bekendmakingen_last_run'`
@@ -68,14 +74,27 @@ export async function syncFellingPermits(env: Env): Promise<number> {
   for (const a of announcements) {
     await env.DB.prepare(
       `INSERT INTO felling_permits
-         (id, publication_id, title, status, tier, source_url, published_at, review_status, created_at)
-       VALUES (?, ?, ?, 'aangevraagd', 'tier2', ?, ?, 'pending', ?)
-       ON CONFLICT(publication_id) DO NOTHING`
+         (id, publication_id, title, address, lat, lon, tree_count, species, status, tier, source_url, published_at, review_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'tier2', ?, ?, 'pending', ?)
+       ON CONFLICT(publication_id) DO UPDATE SET
+         title = excluded.title,
+         address = coalesce(excluded.address, felling_permits.address),
+         lat = coalesce(excluded.lat, felling_permits.lat),
+         lon = coalesce(excluded.lon, felling_permits.lon),
+         tree_count = coalesce(excluded.tree_count, felling_permits.tree_count),
+         species = coalesce(excluded.species, felling_permits.species),
+         status = excluded.status`
     )
       .bind(
         crypto.randomUUID(),
         a.publicationId,
         a.title,
+        a.address,
+        a.lat,
+        a.lon,
+        a.treeCount,
+        a.speciesHint,
+        a.status,
         a.sourceUrl,
         a.publishedAt,
         new Date().toISOString()

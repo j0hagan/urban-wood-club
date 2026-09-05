@@ -18,7 +18,18 @@ interface Tree {
   notes?: string | null
   is_monumental?: number
 }
-type Permit = { id: string; lat: number; lon: number; title: string; status: string }
+type Permit = {
+  id: string
+  lat: number | null
+  lon: number | null
+  title: string
+  status: string
+  address?: string | null
+  tree_count?: number | null
+  species?: string | null
+  published_at?: string | null
+  source_url?: string | null
+}
 type Report = {
   id: string
   lat: number
@@ -35,6 +46,13 @@ const STATUS_LABEL: Record<Report['status'], string> = {
   marked_for_felling: 'Marked for felling',
   felled: 'Already felled',
   new_tree_planted: 'New tree planted',
+}
+
+const PERMIT_STATUS_LABEL: Record<string, string> = {
+  aangevraagd: 'Application submitted',
+  verleend: 'Permit granted',
+  definitief: 'Final decision',
+  geweigerd: 'Application refused',
 }
 
 // Small colored-dot markers (rather than MapLibre's default big teardrop
@@ -208,6 +226,33 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
   `
 }
 
+// Bekendmakingen titles are full sentences, not structured data - address,
+// tree count and species below are all best-effort extraction done at
+// ingest time (see api/src/ingest/bekendmakingen.ts), not guaranteed
+// fields, so each falls back to an em dash when missing.
+function permitPopupHtml(p: Permit): string {
+  const row = (label: string, value: string | number | null | undefined) =>
+    `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+  const rawRow = (label: string, html: string) => `<div class="tree-popup-row"><span>${label}</span><strong>${html}</strong></div>`
+
+  const statusLabel = PERMIT_STATUS_LABEL[p.status] ?? p.status
+  const sourceHtml = p.source_url
+    ? `<a href="${p.source_url}" target="_blank" rel="noopener noreferrer">Officiële bekendmakingen</a>`
+    : '—'
+
+  return `
+    <div class="tree-popup">
+      <h3>${escapeHtml(p.title)}</h3>
+      ${row('Status', statusLabel)}
+      ${row('Address', p.address)}
+      ${row('Trees', p.tree_count)}
+      ${row('Species (reported)', p.species)}
+      ${row('Published', p.published_at ? p.published_at.slice(0, 10) : null)}
+      ${rawRow('Source', sourceHtml)}
+    </div>
+  `
+}
+
 export default function TreeMap({
   layers,
   pickMode,
@@ -339,9 +384,10 @@ export default function TreeMap({
 
     if (layers.permits) {
       permits.forEach((p) => {
+        if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
         const marker = new maplibregl.Marker({ element: dotElement('#e2b93d') }) // keep in sync with --yellow
           .setLngLat([p.lon, p.lat])
-          .setPopup(new maplibregl.Popup().setText(`${p.title} (${p.status})`))
+          .setPopup(new maplibregl.Popup().setHTML(permitPopupHtml(p)))
           .addTo(map)
         markersRef.current.push(marker)
       })
