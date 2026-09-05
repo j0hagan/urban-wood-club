@@ -123,26 +123,39 @@ async function lookupSpeciesInfo(rawName: string): Promise<SpeciesInfo | null> {
       const nlTitle: string | null = entity.sitelinks?.nlwiki?.title ?? null
 
       // P1843 ("taxon common name") holds one monolingual-text value per
-      // vernacular name Wikidata has on record for this species.
-      let commonNameEn: string | null = null
-      let commonNameNl: string | null = null
+      // vernacular name Wikidata has on record - often several per
+      // language (regional variants, alternate spellings). Verified live
+      // against several real Delft species: a species can have half a
+      // dozen Dutch or English entries, so picking just the first one is
+      // a coin flip (e.g. Tilia platyphyllos's first 'nl' entry is
+      // "Grootbladige linde", a literal translation, while its Wikipedia
+      // article is titled "Zomerlinde" - the name actually in use).
       const commonNameClaims: any[] = entity.claims?.P1843 ?? []
-      for (const claim of commonNameClaims) {
-        const value = claim?.mainsnak?.datavalue?.value
-        if (!value || typeof value.text !== 'string') continue
-        if (value.language === 'en' && !commonNameEn) commonNameEn = value.text
-        if (value.language === 'nl' && !commonNameNl) commonNameNl = value.text
+      const commonNamesFor = (lang: 'en' | 'nl'): string[] =>
+        commonNameClaims
+          .map((claim) => claim?.mainsnak?.datavalue?.value)
+          .filter((value) => value && typeof value.text === 'string' && String(value.language).split('-')[0] === lang)
+          .map((value) => value.text as string)
+
+      // Prefer whichever P1843 value matches that language's Wikipedia
+      // article title (the strongest signal of "the" common name in
+      // use); otherwise fall back to the first value Wikidata has.
+      const pickCommonName = (lang: 'en' | 'nl', wikiTitle: string | null): string | null => {
+        const candidates = commonNamesFor(lang)
+        if (!candidates.length) return null
+        const matchingTitle = wikiTitle && candidates.find((c) => c.toLowerCase() === wikiTitle.toLowerCase())
+        return matchingTitle || candidates[0]
       }
 
-      // If Wikidata has no P1843 common name in a language, but that
-      // language's Wikipedia article is titled something other than the
-      // plain scientific name, show that title instead of nothing.
+      // If Wikidata has no P1843 common name in a language at all, but
+      // that language's Wikipedia article is titled something other than
+      // the plain scientific name, show that title instead of nothing.
       const titleIfDistinct = (title: string | null) =>
         title && title.toLowerCase() !== name.toLowerCase() ? title : null
 
       return {
-        en: commonNameEn ?? titleIfDistinct(enTitle),
-        nl: commonNameNl ?? titleIfDistinct(nlTitle),
+        en: pickCommonName('en', enTitle) ?? titleIfDistinct(enTitle),
+        nl: pickCommonName('nl', nlTitle) ?? titleIfDistinct(nlTitle),
         enUrl: enTitle ? wikipediaUrlFor('en', enTitle) : null,
         nlUrl: nlTitle ? wikipediaUrlFor('nl', nlTitle) : null,
       }
