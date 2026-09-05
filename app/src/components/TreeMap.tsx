@@ -33,7 +33,7 @@ export default function TreeMap({
     if (!containerRef.current) return
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: 'https://demotiles.maplibre.org/style.json', // swap for a proper basemap style later
+      style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json', // free, keyless CARTO basemap
       center: DELFT_CENTER,
       zoom: 13,
     })
