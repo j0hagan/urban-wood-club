@@ -9,6 +9,15 @@ export interface Env {
 
 const app = new Hono<{ Bindings: Env }>()
 
+// Temporary diagnostic net: surface the real error instead of a bare
+// "Internal Server Error" while we track down an intermittent 500 on the
+// admin review endpoints. Logs the full error server-side too (visible in
+// the Workers Observability tab) so we're not guessing from the client.
+app.onError((err, c) => {
+  console.error('Unhandled error:', err)
+  return c.json({ error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 500)
+})
+
 app.get('/api/health', (c) => c.json({ ok: true }))
 
 // Tier 1 + 1b
