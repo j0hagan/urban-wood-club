@@ -301,7 +301,10 @@ export default function AdminReview() {
               {permits?.map((p) => (
                 <li key={p.id} className="admin-card">
                   <div className="admin-card-body">
-                    <div className="admin-card-title">{p.title}</div>
+                    <div className="admin-card-title">
+                      {p.title}
+                      {p.tier === 'tier3' && <span className="tier3-badge">Tier 3 · attachment scan</span>}
+                    </div>
                     <dl className="admin-fields">
                       <dt>Status</dt>
                       <dd>{p.status}</dd>

@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { runDailyIngestion, syncDelftTrees, syncFellingPermits } from './ingest/run'
+import { sweepPublicaties } from './ingest/publicaties'
 
 export interface Env {
   DB: D1Database
@@ -242,6 +243,25 @@ app.post('/api/admin/sync/permits', async (c) => {
   try {
     const count = await syncFellingPermits(c.env)
     return c.json({ ok: true, fetched: count })
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'sync failed' }, 500)
+  }
+})
+
+// Tier 3: one chunk of the publicaties.delft.nl attachment sweep - see
+// ingest/publicaties.ts for why this is chunked/resumable and deliberately
+// NOT on the daily cron. Call repeatedly (?refresh=1 on the first call, or
+// whenever you want to pick up newly published cases) until the response's
+// queueRemaining is 0 and discoveryInProgress is false. Matches land in the
+// same pending-review queue as everything else on the "Felling permits" tab
+// at /admin - nothing here goes live on the map on its own.
+app.post('/api/admin/sync/publicaties', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  try {
+    const refresh = c.req.query('refresh') === '1'
+    const result = await sweepPublicaties(c.env, { refresh })
+    return c.json({ ok: true, ...result })
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : 'sync failed' }, 500)
   }

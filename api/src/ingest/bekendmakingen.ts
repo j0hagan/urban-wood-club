@@ -73,7 +73,7 @@ const PDOK_FREE_ENDPOINT = 'https://api.pdok.nl/bzk/locatieserver/search/v3_1/fr
 // own notices use interchangeably with 'kappen' - added explicitly
 // (2026-09-07) rather than relying on it only showing up incidentally
 // alongside one of the other keywords elsewhere in a document's text.
-const FELLING_KEYWORDS = ['kappen', 'vellen', 'houtopstand', 'kapvergunning', 'rooien']
+export const FELLING_KEYWORDS = ['kappen', 'vellen', 'houtopstand', 'kapvergunning', 'rooien']
 
 // This full-text search (see the file header) matches ANY Delft
 // publication whose body mentions one of the keywords above, which is
@@ -176,11 +176,11 @@ export async function fetchDelftFellingAnnouncements(
   return announcements
 }
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function decodeXmlEntities(s: string): string {
+export function decodeXmlEntities(s: string): string {
   return s
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -214,7 +214,7 @@ const ADDRESS_RE = new RegExp(
     `((?:\\s\\d+[a-zA-Z]?)?(?:\\s\\d{4}\\s?[A-Z]{2})?\\s*Delft)`
 )
 
-function extractAddress(title: string): string | null {
+export function extractAddress(title: string): string | null {
   const m = title.match(ADDRESS_RE)
   return m ? `${m[1]}${m[2]}`.replace(/\s+/g, ' ').trim() : null
 }
@@ -261,7 +261,7 @@ const TREE_COUNT_PATTERN = new RegExp(
   'i'
 )
 
-function extractTreeCount(title: string): number | null {
+export function extractTreeCount(title: string): number | null {
   const m = title.match(TREE_COUNT_PATTERN)
   if (!m) return null
   const raw = m[1].toLowerCase()
@@ -288,7 +288,7 @@ const SPECIES_HINTS: Array<[RegExp, string]> = [
   [/\bspar(?:ren)?\b/i, 'spar'],
 ]
 
-function extractSpeciesHint(title: string): string | null {
+export function extractSpeciesHint(title: string): string | null {
   for (const [re, label] of SPECIES_HINTS) {
     if (re.test(title)) return label
   }
@@ -313,7 +313,7 @@ const REASON_HINTS: Array<[RegExp, string]> = [
   [/\boverlast\b/i, 'nuisance (overlast)'],
 ]
 
-function extractReasonHint(title: string): string | null {
+export function extractReasonHint(title: string): string | null {
   for (const [re, label] of REASON_HINTS) {
     if (re.test(title)) return label
   }
@@ -382,7 +382,7 @@ function parseRssResponse(xml: string, since: Date): FellingAnnouncement[] {
 // not meant to be authoritative. A miss (rate-limited, service hiccup,
 // text too long) just leaves the English field null; the Dutch original
 // is always what actually gets stored and shown regardless.
-async function translateToEnglish(text: string): Promise<string | null> {
+export async function translateToEnglish(text: string): Promise<string | null> {
   const url = new URL('https://api.mymemory.translated.net/get')
   url.searchParams.set('q', text)
   url.searchParams.set('langpair', 'nl|en')
@@ -410,7 +410,7 @@ interface PdokFreeResponse {
   }
 }
 
-async function geocodeAddress(address: string): Promise<{ lat: number; lon: number } | null> {
+export async function geocodeAddress(address: string): Promise<{ lat: number; lon: number } | null> {
   const url = new URL(PDOK_FREE_ENDPOINT)
   url.searchParams.set('q', address)
   url.searchParams.set('rows', '1')

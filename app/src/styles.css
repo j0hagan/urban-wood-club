@@ -489,6 +489,7 @@ body {
 }
 .admin-card-body { flex: 1; min-width: 0; }
 .admin-card-title { font-weight: 600; margin-bottom: 8px; }
+.tier3-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fff3d6; color: #7a5b00; font-size: 0.72rem; font-weight: 600; vertical-align: middle; }
 .admin-fields {
   display: grid;
   grid-template-columns: max-content 1fr;
