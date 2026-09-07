@@ -69,7 +69,31 @@
 const RSS_ENDPOINT = 'https://zoek.officielebekendmakingen.nl/rss'
 const PDOK_FREE_ENDPOINT = 'https://api.pdok.nl/bzk/locatieserver/search/v3_1/free'
 
-const FELLING_KEYWORDS = ['kappen', 'vellen', 'houtopstand', 'kapvergunning']
+// 'rooien' (uproot/remove) is a common synonym for felling that Delft's
+// own notices use interchangeably with 'kappen' - added explicitly
+// (2026-09-07) rather than relying on it only showing up incidentally
+// alongside one of the other keywords elsewhere in a document's text.
+const FELLING_KEYWORDS = ['kappen', 'vellen', 'houtopstand', 'kapvergunning', 'rooien']
+
+// This full-text search (see the file header) matches ANY Delft
+// publication whose body mentions one of the keywords above, which is
+// broader than felling-specific notices - it also catches, correctly,
+// a felling mention buried inside an otherwise-unrelated permit (a home
+// extension, an electrical substation, a road project). But it also
+// catches generic municipal policy/regulation documents that reference
+// tree-felling rules in passing without being about any specific tree
+// or address at all - confirmed 2026-09-07 against the first live sync
+// (6 of 119 stored rows: a subsidy scheme, a hearing-procedure
+// decision, an enforcement strategy, the tree ordinance itself, a fees
+// ordinance, a replacement-scheduling handbook - all with no address,
+// no tree count, nothing for the map). These are filtered out by title
+// shape below rather than by "has an address", since roughly a third
+// of genuine felling permits also have no cleanly-extractable address
+// (extractAddress below is best-effort and often comes up empty even
+// for a real permit whose title plainly states one) - filtering on
+// that would silently drop real permits, not just junk.
+const NON_PERMIT_DOCUMENT_PATTERN =
+  /^(Verordening|Subsidieregeling|Handhavingsstrategie|Aanwijzingsbesluit|Handboek|Beleidsregel|Nota |Regeling van|Technische publicatie|Besluit van (Gedeputeerde|Provinciale) Staten)/i
 
 // The search UI's own default scope filter (restricts to actual official
 // publications, excluding e.g. parliamentary documents) - copied verbatim
@@ -329,6 +353,7 @@ function parseRssResponse(xml: string, since: Date): FellingAnnouncement[] {
 
     const [idPart, orgPart] = rawTitle.split(':').map((s) => s.trim())
     if (!idPart || orgPart !== 'Delft') continue
+    if (NON_PERMIT_DOCUMENT_PATTERN.test(description)) continue
 
     const publishedAt = new Date(pubDateRaw)
     if (Number.isNaN(publishedAt.getTime()) || publishedAt < since) continue
