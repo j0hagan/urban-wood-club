@@ -1,7 +1,9 @@
 {
   "name": "urban-wood-club-app",
   "compatibility_date": "2026-09-01",
+  "main": "src/worker.ts",
   "assets": {
-    "directory": "./dist"
+    "directory": "./dist",
+    "binding": "ASSETS"
   }
 }
