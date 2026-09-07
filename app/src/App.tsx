@@ -136,6 +136,10 @@ function pageFromPath(pathname: string): Page {
 export default function App() {
   const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname))
   const [layers, setLayers] = useState<Layers>({ trees: true, permits: true, reports: true })
+  // Mobile only: the sidebar's own Layers section is hidden under 780px
+  // (see .layers-section in styles.css) in favor of this compact toggle
+  // living on the map itself, right below the zoom control.
+  const [layersOpen, setLayersOpen] = useState(false)
 
   // wizard state: 0 = closed, 1/2/3 = Capture/Location/Details
   const [step, setStep] = useState<0 | 1 | 2 | 3>(0)
@@ -282,6 +286,40 @@ export default function App() {
           />
         )}
         {page !== 'map' && <WipPage />}
+        {/* Mobile-only: a compact Layers toggle living on the map itself,
+            below the zoom control (see .map-layers-control in styles.css -
+            hidden entirely above the 780px breakpoint, where the sidebar's
+            own Layers section already covers this). */}
+        {page === 'map' && (
+          <div className="map-layers-control">
+            <button
+              className="map-layers-toggle"
+              onClick={() => setLayersOpen((o) => !o)}
+              aria-expanded={layersOpen}
+            >
+              Layers
+            </button>
+            {layersOpen && (
+              <div className="map-layers-panel">
+                <label className="layer-row">
+                  <input type="checkbox" checked={layers.trees} onChange={() => toggleLayer('trees')} />
+                  <span className="swatch swatch-tree" /> Existing trees
+                  <span className="layer-count">{counts.trees.toLocaleString()}</span>
+                </label>
+                <label className="layer-row">
+                  <input type="checkbox" checked={layers.permits} onChange={() => toggleLayer('permits')} />
+                  <span className="swatch swatch-permit" /> Planned felling
+                  <span className="layer-count">{counts.permits.toLocaleString()}</span>
+                </label>
+                <label className="layer-row">
+                  <input type="checkbox" checked={layers.reports} onChange={() => toggleLayer('reports')} />
+                  <span className="swatch swatch-report" /> Community reports
+                  <span className="layer-count">{counts.reports.toLocaleString()}</span>
+                </label>
+              </div>
+            )}
+          </div>
+        )}
         {page === 'map' && step === 2 && (
           <div className="banner">Click anywhere on the map to mark the tree's location.</div>
         )}

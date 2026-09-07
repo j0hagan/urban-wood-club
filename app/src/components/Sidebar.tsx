@@ -44,7 +44,7 @@ export default function Sidebar({
   return (
     <aside className="sidebar">
       {showMapPanels && (
-        <section>
+        <section className="layers-section">
           <h2>Layers</h2>
           <label className="layer-row">
             <input type="checkbox" checked={layers.trees} onChange={() => onToggle('trees')} />
@@ -67,7 +67,7 @@ export default function Sidebar({
       )}
 
       {showMapPanels && (
-        <section>
+        <section className="community-reports-section">
           <h2>Community reports</h2>
           {reports.length === 0 ? (
             <p className="hint small">No community reports yet — be the first to add one below.</p>
