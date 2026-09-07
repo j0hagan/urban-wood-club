@@ -176,6 +176,8 @@ body {
 .wip-page {
   width: 100%;
   height: 100%;
+  box-sizing: border-box;
+  padding: 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -183,6 +185,7 @@ body {
   gap: 20px;
   background: var(--paper);
 }
+.wip-page svg { max-width: 100%; height: auto; }
 .wip-text {
   font-family: "Times New Roman", Times, serif;
   font-size: 2rem;
@@ -592,6 +595,8 @@ body {
 .map-layers-control { display: none; position: absolute; top: 78px; right: 10px; z-index: 6; }
 
 @media (max-width: 780px) {
+  .layout, .layout * { box-sizing: border-box; }
+
   html, body, #root { height: auto; min-height: 100%; }
 
   .layout {
@@ -684,6 +689,7 @@ body {
   /* Admin review: stack the photo above the fields instead of side by
      side - a 120px photo plus a two-column field grid doesn't fit a
      phone-width card. */
+  .admin-page, .admin-page * { box-sizing: border-box; }
   .admin-page { padding: 20px 14px 60px; }
   .admin-card { flex-direction: column; }
   .admin-photo { width: 100%; height: 200px; }
