@@ -23,10 +23,12 @@ type Permit = {
   lat: number | null
   lon: number | null
   title: string
+  title_en?: string | null
   status: string
   address?: string | null
   tree_count?: number | null
   species?: string | null
+  reason?: string | null
   published_at?: string | null
   source_url?: string | null
 }
@@ -35,9 +37,34 @@ type Report = {
   lat: number
   lon: number
   status: 'marked_for_felling' | 'felled' | 'new_tree_planted'
+  quantity?: string
+  species_known?: number
   species_name?: string
+  request_community_id?: number
+  trunk_measure_type?: string
+  trunk_measure_cm?: number | null
+  felling_reason?: string
+  felling_reason_other?: string
+  felling_date?: string
+  felling_period?: string
+  looking_for_arborist?: number
+  felled_date?: string
+  felled_period?: string
   notes?: string
   photo_url: string
+  created_at?: string
+}
+
+// What the sidebar needs to render its always-visible community report
+// feed - a trimmed view of Report, kept as its own type (rather than
+// exporting/importing Report) to match how this file's other shared shapes
+// (Layers) are already just redeclared per-file rather than shared.
+type ReportSummary = {
+  id: string
+  photo_url: string
+  status: 'marked_for_felling' | 'felled' | 'new_tree_planted'
+  species_name?: string
+  created_at?: string
 }
 
 type Layers = { trees: boolean; permits: boolean; reports: boolean }
@@ -212,7 +239,7 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
   const coordinates = `${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}`
 
   return `
-    <div class="tree-popup">
+    <div class="tree-popup tree-popup-wide">
       <h3>${t.species_nl ? escapeHtml(t.species_nl) : 'Unspecified species'}</h3>
       ${row('English name', englishValue)}
       ${row('Dutch name', dutchValue)}
@@ -222,6 +249,10 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
       ${row('Neighborhood', t.neighborhood)}
       ${row('Coordinates', coordinates)}
       ${rawRow('More info on species', wikiHtml)}
+      <div class="tree-popup-report">
+        <p>See something different in person - marked for felling, already felled, or a new tree planted here? Add a community report and it'll show up on the map as a red marker.</p>
+        <button type="button" class="tree-popup-report-btn">Report this tree</button>
+      </div>
     </div>
   `
 }
@@ -230,6 +261,11 @@ function treePopupHtml(t: Tree, info?: SpeciesInfo | null, loadingInfo?: boolean
 // tree count and species below are all best-effort extraction done at
 // ingest time (see api/src/ingest/bekendmakingen.ts), not guaranteed
 // fields, so each falls back to an em dash when missing.
+// The title translation (title_en) is best-effort machine translation
+// done at ingest time (see api/src/ingest/bekendmakingen.ts) - shown as
+// the heading when available, with the original Dutch text always kept
+// directly below it in its own line rather than replaced, since the
+// translation can be rough and the Dutch is the actual legal text.
 function permitPopupHtml(p: Permit): string {
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
@@ -240,15 +276,70 @@ function permitPopupHtml(p: Permit): string {
     ? `<a href="${p.source_url}" target="_blank" rel="noopener noreferrer">Officiële bekendmakingen</a>`
     : '—'
 
+  const heading = p.title_en
+    ? `<h3>${escapeHtml(p.title_en)}</h3>
+       <div class="tree-popup-original">${escapeHtml(p.title)}</div>`
+    : `<h3>${escapeHtml(p.title)}</h3>`
+
   return `
-    <div class="tree-popup">
-      <h3>${escapeHtml(p.title)}</h3>
+    <div class="tree-popup tree-popup-wide">
+      ${heading}
       ${row('Status', statusLabel)}
       ${row('Address', p.address)}
       ${row('Trees', p.tree_count)}
       ${row('Species (reported)', p.species)}
+      ${row('Reason', p.reason)}
       ${row('Published', p.published_at ? p.published_at.slice(0, 10) : null)}
       ${rawRow('Source', sourceHtml)}
+    </div>
+  `
+}
+
+const QUANTITY_LABEL: Record<string, string> = {
+  single: 'Single tree',
+  few: 'A few (2-5)',
+  several: 'Several (6-20)',
+  street_row: 'Street row / many',
+}
+
+const FELLING_REASON_LABEL: Record<string, string> = {
+  diseased: 'Diseased / dying',
+  storm_damaged: 'Storm damaged',
+  infrastructure: 'Infrastructure threat',
+  building_development: 'Building development',
+  light_improvement: 'Light improvement',
+}
+
+// Same fixed-heading, "-" ("—") for anything unfilled spec-sheet style as
+// treePopupHtml/permitPopupHtml above, so all three marker types (tree,
+// permit, community report) read as one consistent system - every row
+// always appears, whether or not that particular report has that field.
+function reportPopupHtml(r: Report): string {
+  const row = (label: string, value: string | number | null | undefined) =>
+    `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+
+  const reasonValue =
+    r.felling_reason === 'other' ? r.felling_reason_other : r.felling_reason ? FELLING_REASON_LABEL[r.felling_reason] : null
+  const expectedValue = r.felling_date || r.felling_period || null
+  const felledValue = r.felled_date || r.felled_period || null
+  const trunkValue = r.trunk_measure_cm ? `${r.trunk_measure_cm} cm (${r.trunk_measure_type ?? '?'})` : null
+  const speciesValue = r.species_known ? r.species_name : null
+
+  return `
+    <div class="tree-popup tree-popup-wide">
+      <img class="tree-popup-photo" src="${r.photo_url}" alt="Submitted photo" />
+      <h3>${STATUS_LABEL[r.status]}</h3>
+      ${row('Quantity', r.quantity ? QUANTITY_LABEL[r.quantity] ?? r.quantity : null)}
+      ${row('Species', speciesValue)}
+      ${row('Trunk', trunkValue)}
+      ${row('Reason', reasonValue)}
+      ${row('Expected', expectedValue)}
+      ${row('Felled', felledValue)}
+      ${row('Looking for arborist', r.looking_for_arborist ? 'Yes' : null)}
+      ${row('Wants community ID', r.request_community_id ? 'Yes' : null)}
+      ${row('Notes', r.notes)}
+      ${row('Location', `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`)}
+      ${row('Submitted', r.created_at ? r.created_at.slice(0, 10) : null)}
     </div>
   `
 }
@@ -258,15 +349,39 @@ export default function TreeMap({
   pickMode,
   onPick,
   refreshKey,
+  onCounts,
+  onReportTree,
+  onReportsChange,
 }: {
   layers: Layers
   pickMode: boolean
   onPick: (lat: number, lon: number) => void
   refreshKey: number
+  onCounts?: (counts: {
+    trees: number
+    permits: number
+    reports: number
+    permitTreeTotal: number
+  }) => void
+  onReportTree?: (lat: number, lon: number) => void
+  onReportsChange?: (reports: ReportSummary[]) => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
+  // Only one popup (tree, permit, or community report) open at a time -
+  // every popup below is wired through registerPopup() before it's ever
+  // shown, so whichever one opens next closes whatever was open before it.
+  const activePopupRef = useRef<maplibregl.Popup | null>(null)
+  function registerPopup(popup: maplibregl.Popup) {
+    popup.on('open', () => {
+      if (activePopupRef.current && activePopupRef.current !== popup) {
+        activePopupRef.current.remove()
+      }
+      activePopupRef.current = popup
+    })
+    return popup
+  }
   const [mapLoaded, setMapLoaded] = useState(false)
   const [trees, setTrees] = useState<Tree[]>([])
   const [permits, setPermits] = useState<Permit[]>([])
@@ -282,6 +397,9 @@ export default function TreeMap({
       zoom: 13,
     })
     mapRef.current = map
+    // Zoom in/out buttons, per your request - compass/rotate control left
+    // off since this map never rotates.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'top-right')
     map.on('load', () => setMapLoaded(true))
     return () => map.remove()
   }, [])
@@ -306,6 +424,37 @@ export default function TreeMap({
     fetch('/api/permits').then((r) => r.json()).then(setPermits).catch(() => setPermits([]))
     fetch('/api/reports').then((r) => r.json()).then(setReports).catch(() => setReports([]))
   }, [refreshKey])
+
+  // surface item counts to the parent, so the sidebar can show a count
+  // beside each layer's toggle. permitTreeTotal sums each permit's own
+  // tree_count (how many trees that felling notice covers) - a different,
+  // usually larger number than permits.length (how many permit markers are
+  // plotted), since one permit can cover several trees. Permits with an
+  // unknown tree_count (null/undefined - the count couldn't be parsed from
+  // the notice title) are skipped rather than counted as 0.
+  useEffect(() => {
+    const permitTreeTotal = permits.reduce(
+      (sum, p) => (typeof p.tree_count === 'number' ? sum + p.tree_count : sum),
+      0
+    )
+    onCounts?.({ trees: trees.length, permits: permits.length, reports: reports.length, permitTreeTotal })
+  }, [trees, permits, reports, onCounts])
+
+  // the sidebar keeps its own always-visible feed of community reports
+  // (independent of whether the map's "Community reports" layer toggle is
+  // on) - reports is already the approved list from /api/reports, in the
+  // same most-recent-first order the API returns
+  useEffect(() => {
+    onReportsChange?.(
+      reports.map((r) => ({
+        id: r.id,
+        photo_url: r.photo_url,
+        status: r.status,
+        species_name: r.species_name,
+        created_at: r.created_at,
+      }))
+    )
+  }, [reports, onReportsChange])
 
   // Trees: a single GPU-rendered circle layer, not one DOM marker per tree -
   // the only approach that stays smooth at tens of thousands of points.
@@ -351,10 +500,25 @@ export default function TreeMap({
       const feature = e.features?.[0]
       if (!feature || feature.geometry.type !== 'Point') return
       const tree = feature.properties as Tree
-      const popup = new maplibregl.Popup()
+
+      // setHTML() replaces the popup's innerHTML wholesale, which drops any
+      // listener bound to a previous render - so the "Report this tree"
+      // button has to be rewired after every setHTML() call, not just once.
+      const wireReportButton = () => {
+        popup
+          .getElement()
+          ?.querySelector('.tree-popup-report-btn')
+          ?.addEventListener('click', () => onReportTree?.(tree.lat, tree.lon))
+      }
+
+      // Default maplibre popups cap out at 240px wide - too narrow for the
+      // now-doubled .tree-popup-wide layout, so this one gets an explicit
+      // wider cap.
+      const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
         .setLngLat(feature.geometry.coordinates as [number, number])
         .setHTML(treePopupHtml(tree, null, !!tree.species_nl))
         .addTo(map)
+      wireReportButton()
 
       // Show what we already have instantly, then fill in the English/Dutch
       // common names + Wikipedia links once the Wikidata lookup resolves -
@@ -363,6 +527,7 @@ export default function TreeMap({
         lookupSpeciesInfo(tree.species_nl).then((info) => {
           if (!popup.isOpen()) return
           popup.setHTML(treePopupHtml(tree, info, false))
+          wireReportButton()
         })
       }
     })
@@ -387,7 +552,7 @@ export default function TreeMap({
         if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
         const marker = new maplibregl.Marker({ element: dotElement('#e2b93d') }) // keep in sync with --yellow
           .setLngLat([p.lon, p.lat])
-          .setPopup(new maplibregl.Popup().setHTML(permitPopupHtml(p)))
+          .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
           .addTo(map)
         markersRef.current.push(marker)
       })
@@ -395,23 +560,9 @@ export default function TreeMap({
 
     if (layers.reports) {
       reports.forEach((r) => {
-        const popupNode = document.createElement('div')
-        const img = document.createElement('img')
-        img.src = r.photo_url
-        img.style.maxWidth = '200px'
-        img.style.display = 'block'
-        popupNode.appendChild(img)
-        const label = document.createElement('p')
-        label.innerHTML = `<strong>${STATUS_LABEL[r.status]}</strong>${r.species_name ? ` — ${escapeHtml(r.species_name)}` : ''}`
-        popupNode.appendChild(label)
-        if (r.notes) {
-          const note = document.createElement('p')
-          note.textContent = r.notes
-          popupNode.appendChild(note)
-        }
         const marker = new maplibregl.Marker({ element: dotElement('#c33a26') }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
-          .setPopup(new maplibregl.Popup().setDOMContent(popupNode))
+          .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(reportPopupHtml(r)))
           .addTo(map)
         markersRef.current.push(marker)
       })

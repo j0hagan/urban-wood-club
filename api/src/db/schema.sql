@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS felling_permits (
   id TEXT PRIMARY KEY,
   publication_id TEXT UNIQUE NOT NULL,  -- bekendmakingen id, e.g. gmb-2026-123456
   title TEXT NOT NULL,
+  title_en TEXT,
   address TEXT,
   lat REAL,
   lon REAL,
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS felling_permits (
   tier TEXT NOT NULL,            -- 'tier2' | 'tier3'
   source_url TEXT NOT NULL,
   published_at TEXT NOT NULL,
-  review_status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'approved' | 'rejected'
+  review_status TEXT NOT NULL DEFAULT 'approved', -- 'approved' | 'rejected' -- auto-approved on sync: Tier 2/3 comes from an official government feed, not the public, so there's nothing to moderate before it goes live. 'rejected' stays available to hide an individual bad record by hand if one ever shows up.
   created_at TEXT NOT NULL
 );
 

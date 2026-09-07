@@ -21,7 +21,7 @@ app.get('/api/trees', async (c) => {
   return c.json(results)
 })
 
-// Tier 2 + 3 (only ever serves reviewed/approved records)
+// Tier 2 + 3 (auto-approved on sync - see run.ts; this only ever excludes a record someone explicitly rejected by hand)
 app.get('/api/permits', async (c) => {
   const status = c.req.query('status')
   const stmt = status
@@ -155,12 +155,41 @@ app.get('/api/admin/reports/pending', async (c) => {
   return c.json((results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` })))
 })
 
+// Already-live reports - so the admin page can list what's currently on
+// the map for takedown, separate from the pending queue above.
+app.get('/api/admin/reports/approved', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM tree_reports WHERE review_status = 'approved' ORDER BY created_at DESC LIMIT 200`
+  ).all()
+  return c.json((results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` })))
+})
+
 app.post('/api/admin/reports/:id/review', async (c) => {
   const unauthorized = requireAdmin(c)
   if (unauthorized) return unauthorized
   const { status } = await c.req.json<{ status: 'approved' | 'rejected' }>()
   if (status !== 'approved' && status !== 'rejected') return c.json({ error: 'invalid status' }, 400)
   await c.env.DB.prepare('UPDATE tree_reports SET review_status = ? WHERE id = ?').bind(status, c.req.param('id')).run()
+  return c.json({ ok: true })
+})
+
+// Permanent removal - for a community report that's already live (approved)
+// and needs to come down, not just the pending-queue approve/reject above.
+// Cleans up its R2 photo too, so a deleted report doesn't leave an orphaned
+// object behind.
+app.delete('/api/admin/reports/:id', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const id = c.req.param('id')
+  const row = await c.env.DB.prepare('SELECT photo_r2_key FROM tree_reports WHERE id = ?')
+    .bind(id)
+    .first<{ photo_r2_key: string | null }>()
+  await c.env.DB.prepare('DELETE FROM tree_reports WHERE id = ?').bind(id).run()
+  if (row?.photo_r2_key) {
+    await c.env.PHOTOS.delete(row.photo_r2_key).catch(() => {})
+  }
   return c.json({ ok: true })
 })
 

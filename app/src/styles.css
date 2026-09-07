@@ -30,39 +30,82 @@ body {
 .layout {
   display: flex;
   height: 100vh;
+  position: relative; /* positioning context for .brand-header below */
 }
 
 .sidebar {
   width: 320px;
   flex-shrink: 0;
-  padding: 28px 24px;
+  /* extra top padding clears the floating .brand-header, which now lives
+     outside this element entirely (see .brand-header). Taller now that the
+     wordmark itself is much bigger - re-check if the header's height
+     changes again. */
+  padding: 325px 24px 28px; /* trimmed from 350 - closes the gap that used
+                               to sit below the nav's Contact row */
   background: var(--paper);
   border-right: 1px solid var(--line);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 2px;
+/* Page-level brand header: a sibling of .sidebar and .map-area (not
+   inside either), positioned absolutely so the wordmark can overlap past
+   the sidebar's right edge onto the map. pointer-events: none on the
+   wrapper lets map clicks pass through the empty space around the
+   letterforms; the logo mark still sits fully inside the sidebar's own
+   column, immediately beside the wordmark (not off on its own). */
+.brand-header {
+  position: absolute;
+  top: 22px;
+  left: 24px;
+  z-index: 30;
+  pointer-events: none;
 }
-.brand svg { flex-shrink: 0; }
-.sidebar h1 {
-  font-family: "Playfair Display", Georgia, serif;
+/* Logo top-aligns with the wordmark's own top edge (both children of
+   .brand-header sit at top:0), matching the reference lockup where the
+   rings and the "Urban" cap-height start at the same line. */
+.brand-header svg { position: absolute; top: 0; left: 0; pointer-events: auto; cursor: pointer; }
+.brand-title {
+  position: absolute;
+  top: 0;
+  /* Back out toward the map, splitting the two columns as before - the
+     logo stays put at left:0 rather than following it out here. */
+  left: 210px;
+  font-family: "Times New Roman", Times, serif;
   font-style: italic;
   font-weight: 700;
-  font-size: 1.5rem;
+  font-size: 4.6rem; /* doubled from 2.3rem */
+  line-height: 1.05;
   margin: 0;
-  letter-spacing: -0.01em;
+  white-space: nowrap;
+  color: var(--ink);
+  pointer-events: auto; /* clickable - returns to the map, like the logo */
+  cursor: pointer;
 }
-.sidebar .subtitle {
-  margin: 6px 0 22px;
-  color: #6b6355;
+.brand-nav {
+  position: absolute;
+  top: 248px; /* clears both the logo and the taller wordmark block below */
+  left: 0;
+  width: 320px; /* .sidebar has no box-sizing:border-box, so its own
+                    width:320px is already the content-box width the
+                    "line above Layers" spans - match that, not 320-padding */
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  pointer-events: auto;
+}
+.brand-nav span {
   font-size: 0.72rem;
+  font-weight: 700; /* matches .sidebar h2 (Layers / Community reports) */
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  color: var(--ink);
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
 }
+.brand-nav span:last-child { border-bottom: none; }
 
 .sidebar h2 {
   font-size: 0.72rem;
@@ -89,6 +132,12 @@ body {
 .swatch-tree { background: var(--green); }
 .swatch-permit { background: var(--yellow); }
 .swatch-report { background: var(--red); }
+.layer-count {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #83795f;
+}
 
 .report-btn, .wizard-actions button {
   font: inherit;
@@ -104,6 +153,7 @@ body {
 .report-btn { width: 100%; background: var(--ink); color: var(--paper); }
 .report-btn:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
 .report-btn:disabled { opacity: 0.7; cursor: default; }
+
 .wizard-actions button.primary { background: var(--ink); color: var(--paper); }
 .wizard-actions button.primary:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
 .wizard-actions button:not(.primary):hover:not(:disabled) { background: var(--paper-dim); }
@@ -116,7 +166,29 @@ body {
   line-height: 1.5;
 }
 
+/* Pins "Report a tree" to the bottom of the sidebar (left side), regardless
+   of how much - or little - content is above it, since .sidebar is now a
+   flex column (see .sidebar above). */
+.report-section { margin-top: auto; }
+
 .map-area { position: relative; flex: 1; }
+
+.wip-page {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: var(--paper);
+}
+.wip-text {
+  font-family: "Times New Roman", Times, serif;
+  font-size: 2rem;
+  color: var(--ink);
+  margin: 0;
+}
 .map-container { position: absolute; inset: 0; }
 
 .banner {
@@ -278,13 +350,31 @@ body {
   border-radius: 6px;
 }
 .tree-popup { min-width: 180px; }
+/* Reports and, per request, the tree spec-sheet popup get a wider
+   treatment - the permit popup stays at the narrower default above. */
+.tree-popup-wide { min-width: 360px; }
+.tree-popup-photo {
+  display: block;
+  width: 100%;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
 .tree-popup h3 {
-  font-family: "Playfair Display", Georgia, serif;
+  font-family: "Times New Roman", Times, serif;
   font-style: italic;
   font-size: 1rem;
   margin: 0 0 8px;
 }
 .tree-popup h3 em { font-style: normal; color: var(--yellow); font-size: 0.75rem; }
+.tree-popup-original {
+  font-style: italic;
+  color: #6b6355;
+  font-size: 0.72rem;
+  margin: -4px 0 8px;
+  line-height: 1.3;
+}
 .tree-popup-row {
   display: flex;
   justify-content: space-between;
@@ -304,3 +394,183 @@ body {
   font-weight: 600;
 }
 .tree-popup-row strong a:hover { text-decoration: underline; }
+
+/* --- /admin review queue --- */
+.admin-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 20px 80px;
+}
+.admin-header h1 {
+  font-size: 1.4rem;
+  margin: 0 0 6px;
+}
+.admin-header .hint { margin: 0 0 16px; }
+.admin-token-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  max-width: 360px;
+  margin-bottom: 10px;
+}
+.admin-token-row input {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+.admin-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 14px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+.admin-tabs button {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 7px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.admin-tabs button.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.admin-tabs .admin-refresh { margin-left: auto; }
+.admin-subtabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.admin-subtabs button {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: #6b6355;
+  cursor: pointer;
+}
+.admin-subtabs button.active { background: var(--paper-dim); color: var(--ink); border-color: var(--ink); }
+.admin-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.admin-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.admin-card {
+  display: flex;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  background: var(--paper);
+}
+.admin-photo {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: var(--paper-dim);
+}
+.admin-card-body { flex: 1; min-width: 0; }
+.admin-card-title { font-weight: 600; margin-bottom: 8px; }
+.admin-fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 10px;
+  row-gap: 3px;
+  font-size: 0.82rem;
+  margin: 0 0 12px;
+}
+.admin-fields dt { color: #6b6355; }
+.admin-fields dd { margin: 0; }
+.admin-actions { display: flex; gap: 8px; }
+.admin-actions button {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 7px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--ink);
+  cursor: pointer;
+}
+.admin-actions button:disabled { opacity: 0.6; cursor: default; }
+.admin-actions .approve { background: var(--green); border-color: var(--green); color: var(--paper); }
+.admin-actions .reject { background: var(--paper); color: var(--ink); }
+.admin-actions .reject:hover:not(:disabled) { background: var(--red); border-color: var(--red); color: var(--paper); }
+
+/* tree popup: "report this tree" note + button, at the bottom of the
+   existing-tree spec sheet */
+.tree-popup-report {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.tree-popup-report p {
+  font-size: 0.72rem;
+  color: #6b6355;
+  line-height: 1.4;
+  margin: 0 0 8px;
+}
+.tree-popup-report-btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.78rem;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--red);
+  background: var(--paper);
+  color: var(--red);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tree-popup-report-btn:hover { background: var(--red); color: var(--paper); }
+
+/* sidebar: always-visible feed of community reports (above "Report a tree") */
+.report-feed {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.report-feed-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.report-feed-thumb {
+  width: 38px;
+  height: 38px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--paper-dim);
+}
+.report-feed-text {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  min-width: 0;
+}
+.report-feed-text strong { display: block; }
+.report-feed-date {
+  display: block;
+  font-size: 0.7rem;
+  color: #83795f;
+}
