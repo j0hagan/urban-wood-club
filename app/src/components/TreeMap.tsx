@@ -519,6 +519,21 @@ export default function TreeMap({
     // Satellite toggle above the zoom buttons, per your request - added
     // first so it stacks above NavigationControl in the same corner.
     map.addControl(new BasemapToggleControl(), 'top-right')
+    // "Find me" / live location - a built-in MapLibre control rather than
+    // hand-rolled, per your request to see your own position while
+    // walking around (most useful on a phone browser). trackUserLocation
+    // keeps recentering and updating the dot as you move, not just a
+    // one-off fix (this MapLibre version's GeolocateControl has no
+    // heading-arrow option to go with it). Uses the browser's own
+    // Geolocation permission prompt - nothing here works until the person
+    // taps the button and allows it.
+    map.addControl(
+      new maplibregl.GeolocateControl({
+        positionOptions: { enableHighAccuracy: true },
+        trackUserLocation: true,
+      }),
+      'top-right'
+    )
     // Zoom in/out buttons, per your request - compass/rotate control left
     // off since this map never rotates.
     map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'top-right')

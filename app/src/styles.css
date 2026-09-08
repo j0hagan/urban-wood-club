@@ -722,6 +722,19 @@ body {
   /* Report wizard: a real bottom sheet fixed to the viewport, so its
      up-to-85vh height has the whole screen to work with instead of being
      clipped to the map's shorter slice. */
+  /* Report wizard: a real bottom sheet fixed to the viewport, capped
+     below the fixed .brand-header rather than under it. Two bugs were
+     stacking here: (1) 85vh alone uses Safari's "largest possible
+     viewport" (address bar hidden), which is taller than what's actually
+     visible when the address bar is showing - so the sheet's computed
+     top edge could land above the real top of the screen, drawing right
+     over the header. The trailing 85dvh re-declaration overrides it in
+     browsers that support dvh, sizing against the viewport that's
+     actually visible (same fix already used for .map-area above). (2)
+     even with the height fixed, a modal that's meant to be the focused
+     surface shouldn't be capped below a decorative header's z-index -
+     bumped above .brand-header's z-index:30 so an open wizard always
+     wins the stack, not just when the height math lines up. */
   .wizard {
     position: fixed;
     left: 0;
@@ -732,11 +745,12 @@ body {
     width: 100%;
     max-width: 100%;
     max-height: 85vh;
+    max-height: 85dvh;
     border-radius: 14px 14px 0 0;
     border-left: none;
     border-right: none;
     border-bottom: none;
-    z-index: 20;
+    z-index: 40;
   }
   .banner {
     top: auto;
