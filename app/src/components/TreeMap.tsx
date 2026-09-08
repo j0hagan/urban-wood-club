@@ -632,15 +632,27 @@ export default function TreeMap({
       return
     }
 
+    // Dialed back a notch from the previous 2.5/4/7 pass (that pass fixed
+    // the dots reading as "gone" over the sparse default view, but a bit
+    // too big once you're looking at a dense block). The white stroke ring
+    // is dropped entirely over satellite imagery, per your request - it
+    // reads fine against the flat CARTO basemap but looks odd/artificial
+    // against real aerial photography. 'esri-satellite' is the source id
+    // STYLE_SATELLITE declares above, so its presence in whatever style
+    // just (re)loaded is a reliable way to tell which basemap is active -
+    // this whole block reruns on every style swap (see the styleVersion
+    // comment below), so a toggle always gets the right stroke for the
+    // basemap it's landing on.
+    const isSatellite = !!map.getSource('esri-satellite')
     map.addSource('trees', { type: 'geojson', data: geojson as any })
     map.addLayer({
       id: 'trees-circle',
       type: 'circle',
       source: 'trees',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4, 18, 7],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.2, 18, 5.5],
         'circle-color': '#3f6b46', // keep in sync with --green in styles.css
-        'circle-stroke-width': 1,
+        'circle-stroke-width': isSatellite ? 0 : 1,
         'circle-stroke-color': '#fbfaf5',
         'circle-opacity': 0.9,
       },

@@ -6,7 +6,17 @@ export interface Env {
   DB: D1Database
   PHOTOS: R2Bucket
   ADMIN_TOKEN?: string
-  SEND_EMAIL?: SendEmail
+  // Resend (resend.com), not Cloudflare's own Email Routing send_email
+  // binding - switched 2026-09-08 because that binding's sends were
+  // succeeding with zero errors but never actually reaching the inbox
+  // (no DKIM signing, no DMARC record, a brand-new sending domain with no
+  // reputation, and Cloudflare's own Email Routing product gives no
+  // delivery/bounce visibility to diagnose it further). Resend gives a
+  // real per-message delivery status and proper DKIM once the domain is
+  // verified there. A plain secret, not a binding - set via
+  // `wrangler secret put RESEND_API_KEY`, never committed to
+  // wrangler.jsonc.
+  RESEND_API_KEY?: string
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -141,13 +151,12 @@ app.post('/api/reports', async (c) => {
     )
     .run()
 
-  // Best-effort email notification via Cloudflare Email Routing - never lets
-  // a failed/unconfigured send (e.g. before the one-time dashboard setup:
-  // Email Routing enabled + destination address verified) break the actual
-  // report submission.
-  if (c.env.SEND_EMAIL) {
+  // Best-effort email notification via Resend's HTTP API (api.resend.com) -
+  // never lets a failed/unconfigured send break the actual report
+  // submission. See the Env.RESEND_API_KEY comment above for why this
+  // isn't Cloudflare's own Email Routing send_email binding any more.
+  if (c.env.RESEND_API_KEY) {
     try {
-      const { EmailMessage } = await import('cloudflare:email')
       const lines = [
         `A new tree report just came in on Urban Wood Club.`,
         ``,
@@ -159,24 +168,30 @@ app.post('/api/reports', async (c) => {
         ``,
         `Review it: https://urbanwood.club/admin`,
       ].filter((l) => l !== null)
-      const raw =
-        `From: Urban Wood Club <info@urbanwood.club>\r\n` +
-        `To: j.ohagan.tud@gmail.com\r\n` +
-        `Subject: New tree report on Urban Wood Club\r\n` +
-        `Content-Type: text/plain; charset=utf-8\r\n` +
-        `\r\n` +
-        lines.join('\r\n')
-      const message = new EmailMessage('info@urbanwood.club', 'j.ohagan.tud@gmail.com', raw)
-      await c.env.SEND_EMAIL.send(message)
-      console.log('report notification email sent')
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${c.env.RESEND_API_KEY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'Urban Wood Club <info@urbanwood.club>',
+          to: 'j.ohagan.tud@gmail.com',
+          subject: 'New tree report on Urban Wood Club',
+          text: lines.join('\n'),
+        }),
+      })
+      if (!res.ok) throw new Error(`Resend ${res.status}: ${await res.text()}`)
+      const body = (await res.json()) as { id?: string }
+      console.log('report notification email sent, resend id:', body.id)
     } catch (err) {
       // Notification is a nice-to-have, not a submission requirement - but
-      // log it (visible in Workers Observability > Logs once enabled) since
-      // this is otherwise a silent failure with no other way to diagnose it.
+      // log it (visible in Workers Observability > Logs) since this is
+      // otherwise a silent failure with no other way to diagnose it.
       console.error('report notification email failed:', err instanceof Error ? err.message : String(err))
     }
   } else {
-    console.log('report notification skipped: SEND_EMAIL binding not present')
+    console.log('report notification skipped: RESEND_API_KEY not set')
   }
 
   return c.json({ ok: true })
