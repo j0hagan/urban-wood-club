@@ -548,7 +548,10 @@ body {
   font-weight: 600;
   font-size: 0.72rem;
   line-height: 1;
-  padding: 8px 10px;
+  padding: 8px 4px;
+  width: 40px;
+  box-sizing: border-box;
+  text-align: center;
   border: none;
   background: var(--paper);
   color: var(--ink);
@@ -651,7 +654,7 @@ body {
    hidden by default; the media query below turns it on and the
    sidebar's own Layers section (see .layers-section) covers this job
    above that breakpoint. */
-.map-layers-control { display: none; position: absolute; top: 78px; right: 10px; z-index: 6; }
+.map-layers-control { display: none; position: absolute; top: 10px; right: 58px; z-index: 6; }
 
 @media (max-width: 780px) {
   .layout, .layout * { box-sizing: border-box; }
@@ -776,16 +779,22 @@ body {
 .map-layers-toggle {
   font: inherit;
   font-weight: 600;
-  font-size: 0.78rem;
-  padding: 7px 12px;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border: none;
   border-radius: 4px;
-  border: 1px solid var(--ink);
   background: var(--paper);
   color: var(--ink);
   cursor: pointer;
-  box-shadow: 0 1px 4px rgba(23, 19, 15, 0.15);
+  white-space: nowrap;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
 }
 .map-layers-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
   margin-top: 8px;
   padding: 12px;
   border-radius: 6px;

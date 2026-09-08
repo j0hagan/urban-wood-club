@@ -47,7 +47,7 @@ class BasemapToggleControl implements maplibregl.IControl {
     this.button.type = 'button'
     this.button.className = 'basemap-toggle-btn'
     this.button.title = 'Toggle satellite view'
-    this.button.textContent = 'Satellite'
+    this.button.textContent = 'Sat'
     this.button.addEventListener('click', () => this.toggle())
     this.container.appendChild(this.button)
     return this.container
@@ -61,7 +61,7 @@ class BasemapToggleControl implements maplibregl.IControl {
   private toggle() {
     if (!this.map || !this.button) return
     this.satellite = !this.satellite
-    this.button.textContent = this.satellite ? 'Map' : 'Satellite'
+    this.button.textContent = this.satellite ? 'Map' : 'Sat'
     this.button.classList.toggle('active', this.satellite)
     this.map.setStyle(this.satellite ? STYLE_SATELLITE : STYLE_LIGHT)
   }
@@ -625,7 +625,7 @@ export default function TreeMap({
       type: 'circle',
       source: 'trees',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 14, 3, 18, 6],
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2.5, 14, 4, 18, 7],
         'circle-color': '#3f6b46', // keep in sync with --green in styles.css
         'circle-stroke-width': 1,
         'circle-stroke-color': '#fbfaf5',
