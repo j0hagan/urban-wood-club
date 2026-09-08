@@ -6,6 +6,7 @@ export interface Env {
   DB: D1Database
   PHOTOS: R2Bucket
   ADMIN_TOKEN?: string
+  SEND_EMAIL?: SendEmail
 }
 
 const app = new Hono<{ Bindings: Env }>()
@@ -139,6 +140,38 @@ app.post('/api/reports', async (c) => {
       new Date().toISOString()
     )
     .run()
+
+  // Best-effort email notification via Cloudflare Email Routing - never lets
+  // a failed/unconfigured send (e.g. before the one-time dashboard setup:
+  // Email Routing enabled + destination address verified) break the actual
+  // report submission.
+  if (c.env.SEND_EMAIL) {
+    try {
+      const { EmailMessage } = await import('cloudflare:email')
+      const lines = [
+        `A new tree report just came in on Urban Wood Club.`,
+        ``,
+        `Status: ${status}`,
+        `Quantity: ${quantity}`,
+        str('species_known') && str('species_name') ? `Species: ${str('species_name')}` : null,
+        `Location: ${lat}, ${lon}`,
+        `Map: https://urbanwood.club/?lat=${lat}&lon=${lon}`,
+        ``,
+        `Review it: https://urbanwood.club/admin`,
+      ].filter((l) => l !== null)
+      const raw =
+        `From: Urban Wood Club <noreply@urbanwood.club>\r\n` +
+        `To: j.ohagan.tud@gmail.com\r\n` +
+        `Subject: New tree report on Urban Wood Club\r\n` +
+        `Content-Type: text/plain; charset=utf-8\r\n` +
+        `\r\n` +
+        lines.join('\r\n')
+      const message = new EmailMessage('noreply@urbanwood.club', 'j.ohagan.tud@gmail.com', raw)
+      await c.env.SEND_EMAIL.send(message)
+    } catch {
+      // Notification is a nice-to-have, not a submission requirement.
+    }
+  }
 
   return c.json({ ok: true })
 })

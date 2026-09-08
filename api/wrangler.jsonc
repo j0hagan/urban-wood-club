@@ -12,5 +12,15 @@
   "triggers": {
     // daily at 03:00 UTC — permit announcements don't need tighter polling
     "crons": ["0 3 * * *"]
-  }
+  },
+  // New-report email alerts (POST /api/reports in src/index.ts). Requires a
+  // one-time dashboard step before this actually works: enable Email
+  // Routing for the urbanwood.club zone and verify the destination address
+  // below (Cloudflare Dashboard > Email > Email Routing) - a send_email
+  // binding to an unverified address is silently rejected at send time,
+  // not a config error. The code wraps the send in try/catch either way,
+  // so a report submission itself never fails because of this.
+  "send_email": [
+    { "name": "SEND_EMAIL", "destination_address": "j.ohagan.tud@gmail.com" }
+  ]
 }
