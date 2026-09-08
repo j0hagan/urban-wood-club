@@ -161,13 +161,17 @@ const PERMIT_STATUS_LABEL: Record<string, string> = {
 // Small colored-dot markers (rather than MapLibre's default big teardrop
 // pin) - closer to urbanwood.club's map style, and much lighter-weight
 // for the handful of permit/report pins on screen at once.
-function dotElement(color: string): HTMLDivElement {
+function dotElement(color: string, isSatellite: boolean): HTMLDivElement {
   const el = document.createElement('div')
   el.style.width = '13px'
   el.style.height = '13px'
   el.style.borderRadius = '50%'
   el.style.background = color
-  el.style.border = '2px solid #fbfaf5'
+  // A white ring reads fine against the flat CARTO map style but disappears
+  // (or looks washed-out) against real aerial photography - switch to a
+  // dark ink ring over satellite imagery instead, same idea as the
+  // trees-circle layer's own satellite-aware stroke below.
+  el.style.border = isSatellite ? '2px solid #17130f' : '2px solid #fbfaf5'
   el.style.boxShadow = '0 1px 3px rgba(23,19,15,0.45)'
   return el
 }
@@ -652,8 +656,13 @@ export default function TreeMap({
       paint: {
         'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 2, 14, 3.2, 18, 5.5],
         'circle-color': '#3f6b46', // keep in sync with --green in styles.css
-        'circle-stroke-width': isSatellite ? 0 : 1,
-        'circle-stroke-color': '#fbfaf5',
+        'circle-stroke-width': 1,
+        // Same reasoning as dotElement()'s ring below: a plain white stroke
+        // looked artificial over aerial photography, but dropping it
+        // entirely (the previous fix) left the dots looking like flat
+        // green smudges - a dark ink ring reads better on satellite while
+        // white still reads best on the flat CARTO basemap.
+        'circle-stroke-color': isSatellite ? '#17130f' : '#fbfaf5',
         'circle-opacity': 0.9,
       },
     })
@@ -722,11 +731,12 @@ export default function TreeMap({
     if (!map) return
     markersRef.current.forEach((m) => m.remove())
     markersRef.current = []
+    const isSatellite = !!map.getSource('esri-satellite')
 
     if (layers.permits) {
       permits.forEach((p) => {
         if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
-        const marker = new maplibregl.Marker({ element: dotElement('#e2b93d') }) // keep in sync with --yellow
+        const marker = new maplibregl.Marker({ element: dotElement('#e2b93d', isSatellite) }) // keep in sync with --yellow
           .setLngLat([p.lon, p.lat])
           .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
           .addTo(map)
@@ -764,14 +774,17 @@ export default function TreeMap({
               })
           })
         }
-        const marker = new maplibregl.Marker({ element: dotElement('#c33a26') }) // keep in sync with --red
+        const marker = new maplibregl.Marker({ element: dotElement('#c33a26', isSatellite) }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
           .setPopup(reportPopup)
           .addTo(map)
         markersRef.current.push(marker)
       })
     }
-  }, [trees, permits, reports, layers.permits, layers.reports])
+    // styleVersion: re-run after every setStyle() (the satellite toggle) so
+    // these markers get rebuilt with the right ring color for whichever
+    // basemap is now showing - see dotElement()'s isSatellite param above.
+  }, [trees, permits, reports, layers.permits, layers.reports, styleVersion])
 
   return <div ref={containerRef} className="map-container" />
 }
