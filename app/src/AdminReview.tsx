@@ -192,10 +192,24 @@ export default function AdminReview() {
     setError(null)
     try {
       const path = which === 'reports' ? `/api/admin/reports/${id}` : `/api/admin/permits/${id}`
+      // species_known is normalized here, unconditionally, rather than only
+      // inside the species input's own onChange - draft starts as a raw
+      // copy of the existing record (startEdit), so if that record already
+      // had an inconsistent species_name/species_known pair (as some rows
+      // did from before that onChange existed) and the person saves without
+      // happening to touch the species field this time, the stale flag
+      // would otherwise ride along unchanged and the public popup would
+      // keep hiding a species name that's sitting right there in the data.
+      // Deriving it fresh on every save closes that gap for good, and
+      // self-heals any row like that the next time it's edited at all.
+      const body: Record<string, unknown> = { ...draft }
+      if (which === 'reports') {
+        body.species_known = String(body.species_name ?? '').trim() ? 1 : 0
+      }
       const res = await fetch(path, {
         method: 'PATCH',
         headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(body),
       })
       if (res.status === 401) {
         setError('That admin token was rejected — check it and try again.')
@@ -203,9 +217,9 @@ export default function AdminReview() {
       }
       if (!res.ok) throw new Error(await readError(res))
       if (which === 'reports') {
-        setReports((rs) => (rs ?? []).map((r) => (r.id === id ? { ...r, ...draft } as PendingReport : r)))
+        setReports((rs) => (rs ?? []).map((r) => (r.id === id ? { ...r, ...body } as PendingReport : r)))
       } else {
-        setPermits((ps) => (ps ?? []).map((p) => (p.id === id ? { ...p, ...draft } as PendingPermit : p)))
+        setPermits((ps) => (ps ?? []).map((p) => (p.id === id ? { ...p, ...body } as PendingPermit : p)))
       }
       setEditingId(null)
       setDraft({})

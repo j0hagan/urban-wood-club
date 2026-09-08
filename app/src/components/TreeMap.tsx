@@ -63,7 +63,20 @@ class BasemapToggleControl implements maplibregl.IControl {
     this.satellite = !this.satellite
     this.button.textContent = this.satellite ? 'Map' : 'Sat'
     this.button.classList.toggle('active', this.satellite)
-    this.map.setStyle(this.satellite ? STYLE_SATELLITE : STYLE_LIGHT)
+    // { diff: false } forces a full style reload instead of MapLibre's
+    // default diff-based update. That default diffing is exactly why the
+    // tree dots (and any other manually-added layer) were vanishing on
+    // toggle and never coming back: a diffed setStyle() patches the
+    // existing style in place and only fires 'styledata', never
+    // 'style.load' - confirmed live (toggling logged three 'styledata'
+    // events and zero 'style.load' events). The trees-layer effect below
+    // only listens for 'style.load' (via styleVersion) to know when it's
+    // safe to re-add the 'trees' source/layer the new style wiped, so
+    // with diffing it never got a chance to re-run - 'trees' was gone for
+    // good after the first toggle in either direction. A full reload is a
+    // little heavier per click but is the documented way to get a
+    // consistent 'style.load' every time.
+    this.map.setStyle(this.satellite ? STYLE_SATELLITE : STYLE_LIGHT, { diff: false })
   }
 }
 
