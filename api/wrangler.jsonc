@@ -13,13 +13,20 @@
     // daily at 03:00 UTC — permit announcements don't need tighter polling
     "crons": ["0 3 * * *"]
   },
-  // New-report email alerts (POST /api/reports in src/index.ts). Requires a
-  // one-time dashboard step before this actually works: enable Email
-  // Routing for the urbanwood.club zone and verify the destination address
-  // below (Cloudflare Dashboard > Email > Email Routing) - a send_email
-  // binding to an unverified address is silently rejected at send time,
-  // not a config error. The code wraps the send in try/catch either way,
-  // so a report submission itself never fails because of this.
+  // New-report email alerts (POST /api/reports in src/index.ts), sent
+  // "From: info@urbanwood.club" - that address is just the sender identity
+  // (needs the zone onboarded to Email Routing, nothing more); the actual
+  // inbox that receives the alert is the destination_address below, which
+  // must be verified separately (Cloudflare Dashboard > Email > Email
+  // Routing > Destination addresses). If you also want people to be able
+  // to email info@urbanwood.club and have it land somewhere, add a routing
+  // rule there too (Custom address "info" -> Send to email -> this same
+  // verified address) - a destination address on your own routed domain
+  // can never verify itself, since there's no real mailbox to receive its
+  // confirmation link. A send_email binding to an unverified destination
+  // is silently rejected at send time, not a config error - the code wraps
+  // the send in try/catch either way, so a report submission itself never
+  // fails because of this.
   "send_email": [
     { "name": "SEND_EMAIL", "destination_address": "j.ohagan.tud@gmail.com" }
   ]

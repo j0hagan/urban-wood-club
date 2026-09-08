@@ -160,13 +160,13 @@ app.post('/api/reports', async (c) => {
         `Review it: https://urbanwood.club/admin`,
       ].filter((l) => l !== null)
       const raw =
-        `From: Urban Wood Club <noreply@urbanwood.club>\r\n` +
+        `From: Urban Wood Club <info@urbanwood.club>\r\n` +
         `To: j.ohagan.tud@gmail.com\r\n` +
         `Subject: New tree report on Urban Wood Club\r\n` +
         `Content-Type: text/plain; charset=utf-8\r\n` +
         `\r\n` +
         lines.join('\r\n')
-      const message = new EmailMessage('noreply@urbanwood.club', 'j.ohagan.tud@gmail.com', raw)
+      const message = new EmailMessage('info@urbanwood.club', 'j.ohagan.tud@gmail.com', raw)
       await c.env.SEND_EMAIL.send(message)
     } catch {
       // Notification is a nice-to-have, not a submission requirement.
