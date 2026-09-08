@@ -213,6 +213,39 @@ async function lookupSpeciesInfo(rawName: string): Promise<SpeciesInfo | null> {
   return promise
 }
 
+// Rough local distance in meters (equirectangular approximation - fine at
+// Delft's scale, no need for a full haversine). Used to link a "felled"
+// community report back to whatever Tier 1 tree record used to stand
+// there: the municipal dataset has no reliable felled/removed flag (see
+// api/src/ingest/delft-trees.ts's own header comment), so a felled tree's
+// row often just sits in `trees` unchanged - close enough to the report's
+// own coordinates to look up rather than treat as gone.
+function distanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000
+  const avgLatRad = ((lat1 + lat2) / 2) * (Math.PI / 180)
+  const dx = (lon2 - lon1) * (Math.PI / 180) * Math.cos(avgLatRad)
+  const dy = (lat2 - lat1) * (Math.PI / 180)
+  return Math.sqrt(dx * dx + dy * dy) * R
+}
+
+// 20m is generous enough to survive GPS/geocoding slop between a phone
+// report and the municipal survey point, tight enough not to match some
+// unrelated tree a couple of doors down in a dense row.
+const NEAREST_TREE_MAX_METERS = 20
+
+function findNearestTree(lat: number, lon: number, trees: Tree[]): Tree | null {
+  let best: Tree | null = null
+  let bestDist = Infinity
+  for (const t of trees) {
+    const d = distanceMeters(lat, lon, t.lat, t.lon)
+    if (d < bestDist) {
+      bestDist = d
+      best = t
+    }
+  }
+  return best && bestDist <= NEAREST_TREE_MAX_METERS ? best : null
+}
+
 // The popup shows a fixed field list (species header, English/Dutch common
 // name, planted year, height, diameter, neighborhood, coordinates,
 // Wikipedia links) - deliberately not every column the API returns, to
@@ -314,7 +347,7 @@ const FELLING_REASON_LABEL: Record<string, string> = {
 // treePopupHtml/permitPopupHtml above, so all three marker types (tree,
 // permit, community report) read as one consistent system - every row
 // always appears, whether or not that particular report has that field.
-function reportPopupHtml(r: Report): string {
+function reportPopupHtml(r: Report, nearestTree?: Tree | null): string {
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
 
@@ -324,6 +357,19 @@ function reportPopupHtml(r: Report): string {
   const felledValue = r.felled_date || r.felled_period || null
   const trunkValue = r.trunk_measure_cm ? `${r.trunk_measure_cm} cm (${r.trunk_measure_type ?? '?'})` : null
   const speciesValue = r.species_known ? r.species_name : null
+
+  // A felled report still has a nearby Tier 1 record most of the time -
+  // the municipal dataset doesn't reliably mark a tree as removed (see
+  // findNearestTree's own comment above) - so offer a click-through to
+  // what stood here rather than leaving the gap unexplained.
+  const originalTreeHtml =
+    r.status === 'felled' && nearestTree
+      ? `
+      <div class="tree-popup-report">
+        <p>The municipal record for this spot hasn't caught up yet - here's what it still shows as standing here.</p>
+        <button type="button" class="tree-popup-original-btn">See the original tree record</button>
+      </div>`
+      : ''
 
   return `
     <div class="tree-popup tree-popup-wide">
@@ -340,6 +386,7 @@ function reportPopupHtml(r: Report): string {
       ${row('Notes', r.notes)}
       ${row('Location', `${r.lat.toFixed(5)}, ${r.lon.toFixed(5)}`)}
       ${row('Submitted', r.created_at ? r.created_at.slice(0, 10) : null)}
+      ${originalTreeHtml}
     </div>
   `
 }
@@ -560,14 +607,42 @@ export default function TreeMap({
 
     if (layers.reports) {
       reports.forEach((r) => {
+        const nearestTree = r.status === 'felled' ? findNearestTree(r.lat, r.lon, trees) : null
+        const reportPopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
+          reportPopupHtml(r, nearestTree)
+        )
+        // Same "wire it after every render" need as the tree popup's
+        // "Report this tree" button above - and here the popup's DOM
+        // doesn't exist until it's actually opened (these are markers,
+        // not the immediately-added popups the tree click handler uses),
+        // so wiring happens on the 'open' event rather than right away.
+        if (nearestTree) {
+          reportPopup.on('open', () => {
+            reportPopup
+              .getElement()
+              ?.querySelector('.tree-popup-original-btn')
+              ?.addEventListener('click', () => {
+                const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+                  .setLngLat([nearestTree.lon, nearestTree.lat])
+                  .setHTML(treePopupHtml(nearestTree, null, !!nearestTree.species_nl))
+                  .addTo(map)
+                if (nearestTree.species_nl) {
+                  lookupSpeciesInfo(nearestTree.species_nl).then((info) => {
+                    if (!treePopup.isOpen()) return
+                    treePopup.setHTML(treePopupHtml(nearestTree, info, false))
+                  })
+                }
+              })
+          })
+        }
         const marker = new maplibregl.Marker({ element: dotElement('#c33a26') }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
-          .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(reportPopupHtml(r)))
+          .setPopup(reportPopup)
           .addTo(map)
         markersRef.current.push(marker)
       })
     }
-  }, [permits, reports, layers.permits, layers.reports])
+  }, [trees, permits, reports, layers.permits, layers.reports])
 
   return <div ref={containerRef} className="map-container" />
 }

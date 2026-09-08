@@ -565,6 +565,21 @@ body {
   transition: background 0.15s, color 0.15s;
 }
 .tree-popup-report-btn:hover { background: var(--red); color: var(--paper); }
+.tree-popup-original-btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.78rem;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--green);
+  background: var(--paper);
+  color: var(--green);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tree-popup-original-btn:hover { background: var(--green); color: var(--paper); }
+
 
 /* sidebar: always-visible feed of community reports (above "Report a tree") */
 .report-feed {
