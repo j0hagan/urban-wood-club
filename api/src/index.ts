@@ -168,9 +168,15 @@ app.post('/api/reports', async (c) => {
         lines.join('\r\n')
       const message = new EmailMessage('info@urbanwood.club', 'j.ohagan.tud@gmail.com', raw)
       await c.env.SEND_EMAIL.send(message)
-    } catch {
-      // Notification is a nice-to-have, not a submission requirement.
+      console.log('report notification email sent')
+    } catch (err) {
+      // Notification is a nice-to-have, not a submission requirement - but
+      // log it (visible in Workers Observability > Logs once enabled) since
+      // this is otherwise a silent failure with no other way to diagnose it.
+      console.error('report notification email failed:', err instanceof Error ? err.message : String(err))
     }
+  } else {
+    console.log('report notification skipped: SEND_EMAIL binding not present')
   }
 
   return c.json({ ok: true })
