@@ -352,7 +352,7 @@ function reportPopupHtml(r: Report, nearestTree?: Tree | null): string {
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
 
   const reasonValue =
-    r.felling_reason === 'other' ? r.felling_reason_other : r.felling_reason ? FELLING_REASON_LABEL[r.felling_reason] : null
+    r.felling_reason === 'other' ? r.felling_reason_other : r.felling_reason ? (FELLING_REASON_LABEL[r.felling_reason] ?? r.felling_reason) : null
   const expectedValue = r.felling_date || r.felling_period || null
   const felledValue = r.felled_date || r.felled_period || null
   const trunkValue = r.trunk_measure_cm ? `${r.trunk_measure_cm} cm (${r.trunk_measure_type ?? '?'})` : null

@@ -296,7 +296,17 @@ export default function AdminReview() {
                           Species
                           <input
                             value={(draft.species_name as string) ?? ''}
-                            onChange={(e) => draftField('species_name', e.target.value)}
+                            onChange={(e) => {
+                              // A typed name is meaningless while species_known
+                              // stays 0 - every view (this page and the public
+                              // map) hides species_name whenever that flag is
+                              // unset, so the edit would silently look like it
+                              // never saved. Derive the flag from the text
+                              // instead of adding a second control to keep in
+                              // sync with it.
+                              draftField('species_name', e.target.value)
+                              draftField('species_known', e.target.value.trim() ? 1 : 0)
+                            }}
                           />
                         </label>
                         <label>
