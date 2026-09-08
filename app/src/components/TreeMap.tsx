@@ -107,6 +107,7 @@ type Permit = {
   reason?: string | null
   published_at?: string | null
   source_url?: string | null
+  tier?: string | null
 }
 type Report = {
   id: string
@@ -385,18 +386,31 @@ function permitPopupHtml(p: Permit): string {
   const rawRow = (label: string, html: string) => `<div class="tree-popup-row"><span>${label}</span><strong>${html}</strong></div>`
 
   const statusLabel = PERMIT_STATUS_LABEL[p.status] ?? p.status
-  const sourceHtml = p.source_url
-    ? `<a href="${p.source_url}" target="_blank" rel="noopener noreferrer">Officiële bekendmakingen</a>`
-    : '—'
+  const isManual = p.tier === 'manual'
+  // A manual entry's source_url is either a real link the admin pasted in
+  // (checked against http(s)://) or the endpoint's own placeholder text
+  // ("Added by hand in /admin") when they left it blank - only render an
+  // actual <a> when it looks like a URL, otherwise show it as plain text
+  // rather than a dead/misleading link.
+  const sourceHtml = p.source_url && /^https?:\/\//.test(p.source_url)
+    ? `<a href="${escapeHtml(p.source_url)}" target="_blank" rel="noopener noreferrer">${isManual ? 'Source' : 'Officiële bekendmakingen'}</a>`
+    : p.source_url
+      ? escapeHtml(p.source_url)
+      : '—'
 
   const heading = p.title_en
     ? `<h3>${escapeHtml(p.title_en)}</h3>
        <div class="tree-popup-original">${escapeHtml(p.title)}</div>`
     : `<h3>${escapeHtml(p.title)}</h3>`
+  // Same reasoning as the orange map dot: flag a manually-added record
+  // right in the popup too, not just on the map/admin queue, since
+  // "Officiële bekendmakingen" wouldn't be true for one of these.
+  const manualNote = isManual ? `<div class="tree-popup-original">Added by hand, not from the automated permit feed</div>` : ''
 
   return `
     <div class="tree-popup tree-popup-wide">
       ${heading}
+      ${manualNote}
       ${row('Status', statusLabel)}
       ${row('Address', p.address)}
       ${row('Trees', p.tree_count)}
@@ -736,7 +750,14 @@ export default function TreeMap({
     if (layers.permits) {
       permits.forEach((p) => {
         if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
-        const marker = new maplibregl.Marker({ element: dotElement('#e2b93d', isSatellite) }) // keep in sync with --yellow
+        // Auto-scraped (Tier 2/3) permits stay yellow; one the admin added
+        // by hand (tier === 'manual', e.g. hand-checked against GRIB) gets
+        // its own orange so the two are visually distinguishable on the
+        // map itself, not just in the admin queue - keep in sync with
+        // --yellow/--orange in styles.css.
+        const marker = new maplibregl.Marker({
+          element: dotElement(p.tier === 'manual' ? '#d9772b' : '#e2b93d', isSatellite),
+        })
           .setLngLat([p.lon, p.lat])
           .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
           .addTo(map)

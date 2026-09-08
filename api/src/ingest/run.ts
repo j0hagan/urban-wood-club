@@ -78,7 +78,7 @@ export async function syncFellingPermits(env: Env): Promise<number> {
   // on day one finds nothing and looks like a bug. Once ingestion_state has
   // a real last-run date, subsequent runs go back to being incremental.
   const since = lastRun?.value ?? new Date(Date.now() - 400 * 24 * 3600 * 1000).toISOString().slice(0, 10)
-  const announcements = await fetchDelftFellingAnnouncements(since)
+  const announcements = await fetchDelftFellingAnnouncements(since, env.AI)
 
   for (const a of announcements) {
     await env.DB.prepare(

@@ -120,7 +120,8 @@ export interface FellingAnnouncement {
 }
 
 export async function fetchDelftFellingAnnouncements(
-  sinceDateYYYYMMDD: string
+  sinceDateYYYYMMDD: string,
+  ai?: Ai
 ): Promise<FellingAnnouncement[]> {
   const byId = new Map<string, FellingAnnouncement>()
   const since = new Date(`${sinceDateYYYYMMDD}T00:00:00Z`)
@@ -169,7 +170,7 @@ export async function fetchDelftFellingAnnouncements(
   // miss (translator down, rate-limited, etc.) just leaves titleEn null
   // and the popup falls back to Dutch-only.
   for (const a of announcements) {
-    a.titleEn = await translateToEnglish(a.title)
+    a.titleEn = await translateToEnglish(a.title, ai)
     await sleep(200)
   }
 
@@ -377,12 +378,40 @@ function parseRssResponse(xml: string, since: Date): FellingAnnouncement[] {
   return announcements
 }
 
-// Free, keyless machine translation (api.mymemory.translated.net) - good
-// enough for "what does this Dutch permit title roughly say in English",
-// not meant to be authoritative. A miss (rate-limited, service hiccup,
-// text too long) just leaves the English field null; the Dutch original
-// is always what actually gets stored and shown regardless.
-export async function translateToEnglish(text: string): Promise<string | null> {
+// Dutch->English translation for permit titles, shown alongside the Dutch
+// original on the map popup (never replacing it - the Dutch is the actual
+// legal text). Workers AI first, MyMemory as a fallback:
+//
+// MyMemory (api.mymemory.translated.net) was the original, keyless choice
+// here and it's still a fine fallback, but as the *primary* path it turned
+// out to be broken in production specifically: confirmed 2026-09-08 that
+// all 119 already-synced permits had title_en = null on the live site,
+// despite this exact code working fine testing locally via `wrangler dev`.
+// MyMemory's free anonymous tier is rate-limited per IP, and every
+// Cloudflare Worker on the platform shares the same pool of egress IPs -
+// so unlike a request from one person's own laptop, this Worker's
+// requests were very likely arriving already past quota, every time,
+// silently downgraded to a "MYMEMORY WARNING" response that the code
+// below correctly treats as a miss (hence null, not an error). Workers AI
+// runs inside Cloudflare's own infrastructure instead of going out over
+// the open internet, so it isn't subject to that shared-IP quota at all.
+export async function translateToEnglish(text: string, ai?: Ai): Promise<string | null> {
+  if (ai) {
+    try {
+      const result = await ai.run('@cf/meta/m2m100-1.2b', {
+        text,
+        source_lang: 'nl',
+        target_lang: 'en',
+      })
+      const translated = (result as { translated_text?: string })?.translated_text?.trim()
+      if (translated && translated.toLowerCase() !== text.trim().toLowerCase()) {
+        return translated
+      }
+    } catch (err) {
+      console.error('Workers AI translation failed, falling back to MyMemory:', err instanceof Error ? err.message : String(err))
+    }
+  }
+
   const url = new URL('https://api.mymemory.translated.net/get')
   url.searchParams.set('q', text)
   url.searchParams.set('langpair', 'nl|en')

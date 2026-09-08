@@ -361,7 +361,7 @@ export async function sweepPublicaties(
         c.lon = coords.lon
       }
     }
-    c.titleEn = await translateToEnglish(c.title).catch(() => null)
+    c.titleEn = await translateToEnglish(c.title, env.AI).catch(() => null)
   }
 
   await saveState(env, state)

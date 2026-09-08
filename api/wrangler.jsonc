@@ -12,6 +12,21 @@
   "r2_buckets": [
     { "binding": "PHOTOS", "bucket_name": "urban-wood-club-photos" }
   ],
+  // Workers AI - used for Dutch->English permit-title translation
+  // (api/src/ingest/bekendmakingen.ts's translateToEnglish()), added
+  // 2026-09-08 to replace MyMemory as the primary translator: MyMemory's
+  // free anonymous API is IP-rate-limited, and Cloudflare Workers share
+  // egress IPs across every customer on the platform, so that quota was
+  // almost certainly already exhausted before this Worker's own requests
+  // ever went out - every production translation came back null even
+  // though the exact same code worked fine testing from a real machine's
+  // own IP via `wrangler dev`. Workers AI runs inside Cloudflare's own
+  // infrastructure instead, so it isn't subject to that failure mode.
+  // MyMemory is kept as a fallback in translateToEnglish() in case Workers
+  // AI itself is ever unavailable.
+  "ai": {
+    "binding": "AI"
+  },
   "triggers": {
     // daily at 03:00 UTC — permit announcements don't need tighter polling
     "crons": ["0 3 * * *"]

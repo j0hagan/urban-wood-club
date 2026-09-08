@@ -1,11 +1,16 @@
 import { Hono } from 'hono'
 import { runDailyIngestion, syncDelftTrees, syncFellingPermits } from './ingest/run'
 import { sweepPublicaties } from './ingest/publicaties'
+import { geocodeAddress, translateToEnglish } from './ingest/bekendmakingen'
 
 export interface Env {
   DB: D1Database
   PHOTOS: R2Bucket
   ADMIN_TOKEN?: string
+  // Workers AI - Dutch->English permit-title translation, see the comment
+  // in api/src/ingest/bekendmakingen.ts's translateToEnglish() for why
+  // this replaced MyMemory as the primary translator.
+  AI: Ai
   // Resend (resend.com), not Cloudflare's own Email Routing send_email
   // binding - switched 2026-09-08 because that binding's sends were
   // succeeding with zero errors but never actually reaching the inbox
@@ -318,7 +323,7 @@ app.post('/api/admin/permits/:id/review', async (c) => {
 // distinct from the review_status changes above. Same whitelist pattern as
 // the report edit endpoint.
 const EDITABLE_PERMIT_FIELDS = [
-  'title', 'title_en', 'address', 'lat', 'lon', 'tree_count', 'species', 'reason', 'status',
+  'title', 'title_en', 'address', 'lat', 'lon', 'tree_count', 'species', 'reason', 'status', 'source_url',
 ] as const
 
 app.patch('/api/admin/permits/:id', async (c) => {
@@ -332,6 +337,57 @@ app.patch('/api/admin/permits/:id', async (c) => {
     .bind(...keys.map((k) => body[k]), c.req.param('id'))
     .run()
   return c.json({ ok: true })
+})
+
+// Manually adding a felling record by hand - distinct from Tier 2/3, which
+// both come from crawling an official feed automatically. This is for a
+// tree/permit the site owner has personally verified from a source this
+// project can't crawl automatically (the GRIB/Bomenwacht viewer is the
+// motivating case - see the project roadmap's Tier 3/GRIB research notes
+// for why that source stays a manual, occasional check rather than an
+// automated pipeline: it's access-code-gated and its markers only click
+// reliably ~35-40% of the time). Tagged tier = 'manual' so the public map
+// can render it in a different color (orange) from an auto-scraped Tier
+// 2/3 record (yellow) - see TreeMap.tsx's permit marker color.
+app.post('/api/admin/permits', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const body = await c.req.json<Record<string, unknown>>()
+  const title = typeof body.title === 'string' ? body.title.trim() : ''
+  if (!title) return c.json({ error: 'title is required' }, 400)
+
+  const status = typeof body.status === 'string' && body.status.trim() ? body.status.trim() : 'aangevraagd'
+  const address = typeof body.address === 'string' && body.address.trim() ? body.address.trim() : null
+  let lat = typeof body.lat === 'number' ? body.lat : null
+  let lon = typeof body.lon === 'number' ? body.lon : null
+  // No coordinates given directly but an address was - geocode it via the
+  // same free PDOK lookup Tier 2/3 already use, so the admin doesn't have
+  // to go find coordinates by hand for every manual entry.
+  if ((lat == null || lon == null) && address) {
+    const coords = await geocodeAddress(address).catch(() => null)
+    if (coords) {
+      lat = coords.lat
+      lon = coords.lon
+    }
+  }
+  const treeCount = typeof body.tree_count === 'number' ? body.tree_count : null
+  const species = typeof body.species === 'string' && body.species.trim() ? body.species.trim() : null
+  const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : null
+  const sourceUrl = typeof body.source_url === 'string' && body.source_url.trim() ? body.source_url.trim() : 'Added by hand in /admin'
+  const titleEn = await translateToEnglish(title, c.env.AI).catch(() => null)
+
+  const id = crypto.randomUUID()
+  const now = new Date().toISOString()
+  await c.env.DB.prepare(
+    `INSERT INTO felling_permits
+       (id, publication_id, title, title_en, address, lat, lon, tree_count, species, reason, status, tier, source_url, published_at, review_status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, 'approved', ?)`
+  )
+    .bind(id, `manual-${id}`, title, titleEn, address, lat, lon, treeCount, species, reason, status, sourceUrl, now, now)
+    .run()
+
+  const row = await c.env.DB.prepare('SELECT * FROM felling_permits WHERE id = ?').bind(id).first()
+  return c.json(row, 201)
 })
 
 // Permanent removal, mirroring the report delete endpoint above. Permits

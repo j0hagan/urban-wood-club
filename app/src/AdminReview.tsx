@@ -48,6 +48,16 @@ const STATUS_LABEL: Record<string, string> = {
   new_tree_planted: 'New tree planted',
 }
 
+// Same four values felling_permits.status already uses everywhere else
+// (bekendmakingen.ts's PERMIT_STATUS_LABEL on the public map) - reused
+// here as the dropdown for a manually-added permit below.
+const PERMIT_STATUS_OPTIONS: [string, string][] = [
+  ['aangevraagd', 'Application submitted'],
+  ['verleend', 'Permit granted'],
+  ['definitief', 'Final decision'],
+  ['geweigerd', 'Application refused'],
+]
+
 async function readError(res: Response): Promise<string> {
   try {
     const body = await res.json()
@@ -78,6 +88,16 @@ export default function AdminReview() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+
+  // Manually adding a felling record - distinct from the Tier 2/3 auto-sync
+  // above, for a tree/permit the admin has personally verified from a
+  // source this project doesn't scrape automatically (e.g. hand-checking
+  // the GRIB/Bomenwacht viewer - see the project roadmap's Tier 3/GRIB
+  // notes). Tagged tier = 'manual' server-side so the public map can color
+  // it differently (orange) from an auto-scraped record (yellow).
+  const [showAddPermit, setShowAddPermit] = useState(false)
+  const [newPermit, setNewPermit] = useState<Record<string, string>>({ status: 'aangevraagd' })
+  const [addingPermit, setAddingPermit] = useState(false)
 
   useEffect(() => {
     localStorage.setItem('uwc_admin_token', token)
@@ -168,6 +188,56 @@ export default function AdminReview() {
       setError(e instanceof Error ? e.message : 'Something went wrong deleting that record.')
     } finally {
       setBusyId(null)
+    }
+  }
+
+  function newPermitField(key: string, value: string) {
+    setNewPermit((d) => ({ ...d, [key]: value }))
+  }
+
+  async function submitNewPermit() {
+    const title = (newPermit.title ?? '').trim()
+    if (!title) {
+      setError('Give the manually-added permit a title before saving.')
+      return
+    }
+    setAddingPermit(true)
+    setError(null)
+    try {
+      const body: Record<string, unknown> = { title, status: newPermit.status || 'aangevraagd' }
+      if (newPermit.address?.trim()) body.address = newPermit.address.trim()
+      if (newPermit.tree_count?.trim()) body.tree_count = Number(newPermit.tree_count)
+      if (newPermit.species?.trim()) body.species = newPermit.species.trim()
+      if (newPermit.reason?.trim()) body.reason = newPermit.reason.trim()
+      if (newPermit.source_url?.trim()) body.source_url = newPermit.source_url.trim()
+      const res = await fetch('/api/admin/permits', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (res.status === 401) {
+        setError('That admin token was rejected — check it and try again.')
+        return
+      }
+      if (!res.ok) throw new Error(await readError(res))
+      // New permits are created already-approved (same as Tier 2/3 - the
+      // admin has personally vetted this one by hand), so it only shows up
+      // under the "Live on the map" subtab, not "Pending" - switch there
+      // so it's immediately visible rather than seeming to have vanished.
+      // Fetch the approved list directly here rather than calling load('permits')
+      // or relying on the setPermitsView effect below - both would still
+      // read permitsView's stale pre-update value in this closure (React
+      // state updates aren't synchronous), so a call made when the admin
+      // was already on "Pending" would silently refetch the wrong list.
+      setPermitsView('approved')
+      setNewPermit({ status: 'aangevraagd' })
+      setShowAddPermit(false)
+      const res2 = await fetch('/api/admin/permits/approved', { headers: { authorization: `Bearer ${token}` } })
+      if (res2.ok) setPermits(await res2.json())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong adding that permit.')
+    } finally {
+      setAddingPermit(false)
     }
   }
 
@@ -459,6 +529,69 @@ export default function AdminReview() {
               <button className={permitsView === 'approved' ? 'active' : ''} onClick={() => setPermitsView('approved')}>
                 Live on the map
               </button>
+              <button className="edit" onClick={() => setShowAddPermit((v) => !v)}>
+                {showAddPermit ? 'Cancel' : '+ Add by hand'}
+              </button>
+            </div>
+          )}
+
+          {tab === 'permits' && showAddPermit && (
+            <div className="admin-edit-form admin-add-permit">
+              <label>
+                Title
+                <input
+                  value={newPermit.title ?? ''}
+                  onChange={(e) => newPermitField('title', e.target.value)}
+                  placeholder="e.g. Kapvergunningsplichtig - Oude Delft 12"
+                />
+              </label>
+              <label>
+                Status
+                <select value={newPermit.status ?? 'aangevraagd'} onChange={(e) => newPermitField('status', e.target.value)}>
+                  {PERMIT_STATUS_OPTIONS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Trees
+                <input
+                  type="number"
+                  value={newPermit.tree_count ?? ''}
+                  onChange={(e) => newPermitField('tree_count', e.target.value)}
+                />
+              </label>
+              <label>
+                Species
+                <input value={newPermit.species ?? ''} onChange={(e) => newPermitField('species', e.target.value)} />
+              </label>
+              <label>
+                Reason
+                <input value={newPermit.reason ?? ''} onChange={(e) => newPermitField('reason', e.target.value)} />
+              </label>
+              <label>
+                Address
+                <input
+                  value={newPermit.address ?? ''}
+                  onChange={(e) => newPermitField('address', e.target.value)}
+                  placeholder="Geocoded automatically on save if left with no coordinates"
+                />
+              </label>
+              <label>
+                Source link (optional)
+                <input
+                  value={newPermit.source_url ?? ''}
+                  onChange={(e) => newPermitField('source_url', e.target.value)}
+                  placeholder="e.g. the GRIB/Bomenwacht viewer URL you checked this against"
+                />
+              </label>
+              <div className="admin-actions">
+                <button className="approve" disabled={addingPermit} onClick={submitNewPermit}>
+                  {addingPermit ? 'Adding…' : 'Add to the map'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -473,6 +606,7 @@ export default function AdminReview() {
                     <div className="admin-card-title">
                       {p.title}
                       {p.tier === 'tier3' && <span className="tier3-badge">Tier 3 · attachment scan</span>}
+                      {p.tier === 'manual' && <span className="manual-badge">Added by hand</span>}
                     </div>
                     {editingId === p.id ? (
                       <div className="admin-edit-form">

@@ -16,7 +16,8 @@
   --paper-dim: #f3efe4;
   --line: #ddd6c4;
   --green: #3f6b46;   /* existing trees */
-  --yellow: #e2b93d;  /* planned felling - mirrors the poster's highlighter */
+  --yellow: #e2b93d;  /* planned felling (auto-scraped from Tier 2/3) - mirrors the poster's highlighter */
+  --orange: #d9772b;  /* planned felling, added by hand in /admin (e.g. from GRIB) - distinct from the auto-scraped yellow */
   --red: #c33a26;     /* community reports - mirrors the poster's dashed-line annotation */
 }
 
@@ -490,6 +491,7 @@ body {
 .admin-card-body { flex: 1; min-width: 0; }
 .admin-card-title { font-weight: 600; margin-bottom: 8px; }
 .tier3-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fff3d6; color: #7a5b00; font-size: 0.72rem; font-weight: 600; vertical-align: middle; }
+.manual-badge { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 999px; background: #fbe3cd; color: #8a4a10; font-size: 0.72rem; font-weight: 600; vertical-align: middle; }
 .admin-fields {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -526,6 +528,7 @@ body {
   color: #6b6355;
 }
 .admin-edit-form input,
+.admin-edit-form select,
 .admin-edit-form textarea {
   font: inherit;
   font-size: 0.85rem;
@@ -536,6 +539,16 @@ body {
   color: var(--ink);
 }
 .admin-edit-form textarea { min-height: 50px; resize: vertical; }
+/* The "+ Add by hand" form reuses .admin-edit-form's field layout but
+   sits above the list rather than inside a card, so it gets its own
+   light border/background to read as a distinct panel. */
+.admin-add-permit {
+  padding: 12px;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper-dim);
+}
 
 
 /* Satellite/map basemap toggle - a custom MapLibre control stacked above
