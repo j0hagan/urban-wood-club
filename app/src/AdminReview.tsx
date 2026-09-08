@@ -48,6 +48,16 @@ const STATUS_LABEL: Record<string, string> = {
   new_tree_planted: 'New tree planted',
 }
 
+async function readError(res: Response): Promise<string> {
+  try {
+    const body = await res.json()
+    if (body && typeof body.error === 'string') return body.error
+  } catch {
+    // response wasn't JSON - fall through to the generic message
+  }
+  return `Request failed (${res.status})`
+}
+
 function fmt(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—'
   return String(value)
@@ -60,6 +70,9 @@ export default function AdminReview() {
   // and what's already live on the map (delete only - it's already been
   // through the queue once).
   const [reportsView, setReportsView] = useState<'pending' | 'approved'>('pending')
+  // Felling permits: same pending/live split as reports, so a permit that's
+  // already live can be found and (rarely) deleted, not just reviewed.
+  const [permitsView, setPermitsView] = useState<'pending' | 'approved'>('pending')
   const [reports, setReports] = useState<PendingReport[] | null>(null)
   const [permits, setPermits] = useState<PendingPermit[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -80,7 +93,9 @@ export default function AdminReview() {
           ? reportsView === 'pending'
             ? '/api/admin/reports/pending'
             : '/api/admin/reports/approved'
-          : '/api/admin/permits/pending'
+          : permitsView === 'pending'
+            ? '/api/admin/permits/pending'
+            : '/api/admin/permits/approved'
       const res = await fetch(path, { headers: { authorization: `Bearer ${token}` } })
       if (res.status === 401) {
         setError('That admin token was rejected — check it and try again.')
@@ -102,7 +117,7 @@ export default function AdminReview() {
   useEffect(() => {
     load(tab)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, token, reportsView])
+  }, [tab, token, reportsView, permitsView])
 
   async function review(which: Tab, id: string, status: 'approved' | 'rejected') {
     setBusyId(id)
@@ -118,7 +133,7 @@ export default function AdminReview() {
         setError('That admin token was rejected — check it and try again.')
         return
       }
-      if (!res.ok) throw new Error(`Request failed (${res.status})`)
+      if (!res.ok) throw new Error(await readError(res))
       if (which === 'reports') setReports((rs) => (rs ?? []).filter((r) => r.id !== id))
       else setPermits((ps) => (ps ?? []).filter((p) => p.id !== id))
     } catch (e) {
@@ -128,15 +143,17 @@ export default function AdminReview() {
     }
   }
 
-  // Permanent takedown of an already-live community report (the "Live"
-  // view above) - distinct from reject, which only applies to the pending
-  // queue and just marks a report as never having gone live.
-  async function deleteReport(id: string) {
-    if (!window.confirm('Permanently delete this community report? This cannot be undone.')) return
+  // Permanent takedown of an already-live record (the "Live" view above,
+  // on either tab) - distinct from reject, which only applies to the
+  // pending queue and just marks something as never having gone live.
+  async function remove(which: Tab, id: string) {
+    const label = which === 'reports' ? 'community report' : 'felling permit'
+    if (!window.confirm(`Permanently delete this ${label}? This cannot be undone.`)) return
     setBusyId(id)
     setError(null)
     try {
-      const res = await fetch(`/api/admin/reports/${id}`, {
+      const path = which === 'reports' ? `/api/admin/reports/${id}` : `/api/admin/permits/${id}`
+      const res = await fetch(path, {
         method: 'DELETE',
         headers: { authorization: `Bearer ${token}` },
       })
@@ -144,13 +161,63 @@ export default function AdminReview() {
         setError('That admin token was rejected — check it and try again.')
         return
       }
-      if (!res.ok) throw new Error(`Request failed (${res.status})`)
-      setReports((rs) => (rs ?? []).filter((r) => r.id !== id))
+      if (!res.ok) throw new Error(await readError(res))
+      if (which === 'reports') setReports((rs) => (rs ?? []).filter((r) => r.id !== id))
+      else setPermits((ps) => (ps ?? []).filter((p) => p.id !== id))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong deleting that report.')
+      setError(e instanceof Error ? e.message : 'Something went wrong deleting that record.')
     } finally {
       setBusyId(null)
     }
+  }
+
+  // Inline editing - a card in edit mode swaps its <dl> for a small form;
+  // Save PATCHes only the fields that changed, Cancel just drops the draft.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState<Record<string, unknown>>({})
+
+  function startEdit(record: Record<string, unknown>) {
+    setEditingId(record.id as string)
+    setDraft({ ...record })
+    setError(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setDraft({})
+  }
+
+  async function saveEdit(which: Tab, id: string) {
+    setBusyId(id)
+    setError(null)
+    try {
+      const path = which === 'reports' ? `/api/admin/reports/${id}` : `/api/admin/permits/${id}`
+      const res = await fetch(path, {
+        method: 'PATCH',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      if (res.status === 401) {
+        setError('That admin token was rejected — check it and try again.')
+        return
+      }
+      if (!res.ok) throw new Error(await readError(res))
+      if (which === 'reports') {
+        setReports((rs) => (rs ?? []).map((r) => (r.id === id ? { ...r, ...draft } as PendingReport : r)))
+      } else {
+        setPermits((ps) => (ps ?? []).map((p) => (p.id === id ? { ...p, ...draft } as PendingPermit : p)))
+      }
+      setEditingId(null)
+      setDraft({})
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong saving those changes.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  function draftField(key: string, value: unknown) {
+    setDraft((d) => ({ ...d, [key]: value }))
   }
 
   const reportCount = reports?.length ?? 0
@@ -223,72 +290,137 @@ export default function AdminReview() {
                     <div className="admin-card-title">
                       {STATUS_LABEL[r.status] ?? r.status} · {r.quantity}
                     </div>
-                    <dl className="admin-fields">
-                      <dt>Species</dt>
-                      <dd>{r.species_known ? fmt(r.species_name) : 'Not known'}</dd>
-                      <dt>Trunk</dt>
-                      <dd>
-                        {r.trunk_measure_cm ? `${r.trunk_measure_cm} cm (${fmt(r.trunk_measure_type)})` : '—'}
-                      </dd>
-                      {r.status === 'marked_for_felling' && (
-                        <>
-                          <dt>Reason</dt>
-                          <dd>{r.felling_reason === 'other' ? fmt(r.felling_reason_other) : fmt(r.felling_reason)}</dd>
-                          <dt>Expected</dt>
-                          <dd>{fmt(r.felling_date) !== '—' ? fmt(r.felling_date) : fmt(r.felling_period)}</dd>
-                        </>
-                      )}
-                      {r.status === 'felled' && (
-                        <>
-                          <dt>Felled</dt>
-                          <dd>{fmt(r.felled_date) !== '—' ? fmt(r.felled_date) : fmt(r.felled_period)}</dd>
-                        </>
-                      )}
-                      {!!r.looking_for_arborist && (
-                        <>
-                          <dt>Looking for arborist</dt>
-                          <dd>{fmt(r.arborist_contact)}</dd>
-                        </>
-                      )}
-                      {!!r.request_community_id && (
-                        <>
-                          <dt>Wants community ID</dt>
-                          <dd>Yes</dd>
-                        </>
-                      )}
-                      <dt>Notes</dt>
-                      <dd>{fmt(r.notes)}</dd>
-                      <dt>Location</dt>
-                      <dd>
-                        {r.lat.toFixed(5)}, {r.lon.toFixed(5)}
-                      </dd>
-                      <dt>Submitted</dt>
-                      <dd>{r.created_at.slice(0, 10)}</dd>
-                    </dl>
-                    <div className="admin-actions">
-                      {reportsView === 'pending' ? (
-                        <>
-                          <button
-                            className="approve"
-                            disabled={busyId === r.id}
-                            onClick={() => review('reports', r.id, 'approved')}
-                          >
-                            Approve
+                    {editingId === r.id ? (
+                      <div className="admin-edit-form">
+                        <label>
+                          Species
+                          <input
+                            value={(draft.species_name as string) ?? ''}
+                            onChange={(e) => draftField('species_name', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Trunk (cm)
+                          <input
+                            type="number"
+                            value={(draft.trunk_measure_cm as number) ?? ''}
+                            onChange={(e) => draftField('trunk_measure_cm', e.target.value === '' ? null : Number(e.target.value))}
+                          />
+                        </label>
+                        <label>
+                          Reason
+                          <input
+                            value={(draft.felling_reason as string) ?? ''}
+                            onChange={(e) => draftField('felling_reason', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Notes
+                          <textarea
+                            value={(draft.notes as string) ?? ''}
+                            onChange={(e) => draftField('notes', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Latitude
+                          <input
+                            type="number"
+                            step="any"
+                            value={(draft.lat as number) ?? ''}
+                            onChange={(e) => draftField('lat', Number(e.target.value))}
+                          />
+                        </label>
+                        <label>
+                          Longitude
+                          <input
+                            type="number"
+                            step="any"
+                            value={(draft.lon as number) ?? ''}
+                            onChange={(e) => draftField('lon', Number(e.target.value))}
+                          />
+                        </label>
+                        <div className="admin-actions">
+                          <button className="approve" disabled={busyId === r.id} onClick={() => saveEdit('reports', r.id)}>
+                            Save
                           </button>
-                          <button
-                            className="reject"
-                            disabled={busyId === r.id}
-                            onClick={() => review('reports', r.id, 'rejected')}
-                          >
-                            Reject
+                          <button className="reject" disabled={busyId === r.id} onClick={cancelEdit}>
+                            Cancel
                           </button>
-                        </>
-                      ) : (
-                        <button className="reject" disabled={busyId === r.id} onClick={() => deleteReport(r.id)}>
-                          Delete
-                        </button>
-                      )}
-                    </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <dl className="admin-fields">
+                          <dt>Species</dt>
+                          <dd>{r.species_known ? fmt(r.species_name) : 'Not known'}</dd>
+                          <dt>Trunk</dt>
+                          <dd>
+                            {r.trunk_measure_cm ? `${r.trunk_measure_cm} cm (${fmt(r.trunk_measure_type)})` : '—'}
+                          </dd>
+                          {r.status === 'marked_for_felling' && (
+                            <>
+                              <dt>Reason</dt>
+                              <dd>{r.felling_reason === 'other' ? fmt(r.felling_reason_other) : fmt(r.felling_reason)}</dd>
+                              <dt>Expected</dt>
+                              <dd>{fmt(r.felling_date) !== '—' ? fmt(r.felling_date) : fmt(r.felling_period)}</dd>
+                            </>
+                          )}
+                          {r.status === 'felled' && (
+                            <>
+                              <dt>Felled</dt>
+                              <dd>{fmt(r.felled_date) !== '—' ? fmt(r.felled_date) : fmt(r.felled_period)}</dd>
+                            </>
+                          )}
+                          {!!r.looking_for_arborist && (
+                            <>
+                              <dt>Looking for arborist</dt>
+                              <dd>{fmt(r.arborist_contact)}</dd>
+                            </>
+                          )}
+                          {!!r.request_community_id && (
+                            <>
+                              <dt>Wants community ID</dt>
+                              <dd>Yes</dd>
+                            </>
+                          )}
+                          <dt>Notes</dt>
+                          <dd>{fmt(r.notes)}</dd>
+                          <dt>Location</dt>
+                          <dd>
+                            {r.lat.toFixed(5)}, {r.lon.toFixed(5)}
+                          </dd>
+                          <dt>Submitted</dt>
+                          <dd>{r.created_at.slice(0, 10)}</dd>
+                        </dl>
+                        <div className="admin-actions">
+                          {reportsView === 'pending' ? (
+                            <>
+                              <button
+                                className="approve"
+                                disabled={busyId === r.id}
+                                onClick={() => review('reports', r.id, 'approved')}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                className="reject"
+                                disabled={busyId === r.id}
+                                onClick={() => review('reports', r.id, 'rejected')}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : (
+                            <button className="reject" disabled={busyId === r.id} onClick={() => remove('reports', r.id)}>
+                              Delete
+                            </button>
+                          )}
+                          <button className="edit" disabled={busyId === r.id} onClick={() => startEdit(r)}>
+                            Edit
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </li>
               ))}
@@ -296,8 +428,21 @@ export default function AdminReview() {
           )}
 
           {tab === 'permits' && (
+            <div className="admin-subtabs">
+              <button className={permitsView === 'pending' ? 'active' : ''} onClick={() => setPermitsView('pending')}>
+                Pending
+              </button>
+              <button className={permitsView === 'approved' ? 'active' : ''} onClick={() => setPermitsView('approved')}>
+                Live on the map
+              </button>
+            </div>
+          )}
+
+          {tab === 'permits' && (
             <ul className="admin-list">
-              {permits && permits.length === 0 && !loading && <li className="hint">Nothing pending review.</li>}
+              {permits && permits.length === 0 && !loading && (
+                <li className="hint">{permitsView === 'pending' ? 'Nothing pending review.' : 'Nothing live right now.'}</li>
+              )}
               {permits?.map((p) => (
                 <li key={p.id} className="admin-card">
                   <div className="admin-card-body">
@@ -305,42 +450,104 @@ export default function AdminReview() {
                       {p.title}
                       {p.tier === 'tier3' && <span className="tier3-badge">Tier 3 · attachment scan</span>}
                     </div>
-                    <dl className="admin-fields">
-                      <dt>Status</dt>
-                      <dd>{p.status}</dd>
-                      <dt>Trees</dt>
-                      <dd>{fmt(p.tree_count)}</dd>
-                      <dt>Species</dt>
-                      <dd>{fmt(p.species)}</dd>
-                      <dt>Reason</dt>
-                      <dd>{fmt(p.reason)}</dd>
-                      <dt>Address</dt>
-                      <dd>{fmt(p.address)}</dd>
-                      <dt>Published</dt>
-                      <dd>{p.published_at.slice(0, 10)}</dd>
-                      <dt>Source</dt>
-                      <dd>
-                        <a href={p.source_url} target="_blank" rel="noreferrer">
-                          {p.publication_id}
-                        </a>
-                      </dd>
-                    </dl>
-                    <div className="admin-actions">
-                      <button
-                        className="approve"
-                        disabled={busyId === p.id}
-                        onClick={() => review('permits', p.id, 'approved')}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="reject"
-                        disabled={busyId === p.id}
-                        onClick={() => review('permits', p.id, 'rejected')}
-                      >
-                        Reject
-                      </button>
-                    </div>
+                    {editingId === p.id ? (
+                      <div className="admin-edit-form">
+                        <label>
+                          Title
+                          <input
+                            value={(draft.title as string) ?? ''}
+                            onChange={(e) => draftField('title', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Trees
+                          <input
+                            type="number"
+                            value={(draft.tree_count as number) ?? ''}
+                            onChange={(e) => draftField('tree_count', e.target.value === '' ? null : Number(e.target.value))}
+                          />
+                        </label>
+                        <label>
+                          Species
+                          <input
+                            value={(draft.species as string) ?? ''}
+                            onChange={(e) => draftField('species', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Reason
+                          <input
+                            value={(draft.reason as string) ?? ''}
+                            onChange={(e) => draftField('reason', e.target.value)}
+                          />
+                        </label>
+                        <label>
+                          Address
+                          <input
+                            value={(draft.address as string) ?? ''}
+                            onChange={(e) => draftField('address', e.target.value)}
+                          />
+                        </label>
+                        <div className="admin-actions">
+                          <button className="approve" disabled={busyId === p.id} onClick={() => saveEdit('permits', p.id)}>
+                            Save
+                          </button>
+                          <button className="reject" disabled={busyId === p.id} onClick={cancelEdit}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <dl className="admin-fields">
+                          <dt>Status</dt>
+                          <dd>{p.status}</dd>
+                          <dt>Trees</dt>
+                          <dd>{fmt(p.tree_count)}</dd>
+                          <dt>Species</dt>
+                          <dd>{fmt(p.species)}</dd>
+                          <dt>Reason</dt>
+                          <dd>{fmt(p.reason)}</dd>
+                          <dt>Address</dt>
+                          <dd>{fmt(p.address)}</dd>
+                          <dt>Published</dt>
+                          <dd>{p.published_at.slice(0, 10)}</dd>
+                          <dt>Source</dt>
+                          <dd>
+                            <a href={p.source_url} target="_blank" rel="noreferrer">
+                              {p.publication_id}
+                            </a>
+                          </dd>
+                        </dl>
+                        <div className="admin-actions">
+                          {permitsView === 'pending' ? (
+                            <>
+                              <button
+                                className="approve"
+                                disabled={busyId === p.id}
+                                onClick={() => review('permits', p.id, 'approved')}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                className="reject"
+                                disabled={busyId === p.id}
+                                onClick={() => review('permits', p.id, 'rejected')}
+                              >
+                                Reject
+                              </button>
+                            </>
+                          ) : (
+                            <button className="reject" disabled={busyId === p.id} onClick={() => remove('permits', p.id)}>
+                              Delete
+                            </button>
+                          )}
+                          <button className="edit" disabled={busyId === p.id} onClick={() => startEdit(p)}>
+                            Edit
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </li>
               ))}

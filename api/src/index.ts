@@ -185,6 +185,30 @@ app.post('/api/admin/reports/:id/review', async (c) => {
   return c.json({ ok: true })
 })
 
+// Editing a report's own content (species, trunk size, notes, etc.) -
+// distinct from the review_status changes above. Whitelisted column list
+// so this can never be used to touch id/photo_r2_key/created_at/review_status
+// by sending an unexpected key in the body.
+const EDITABLE_REPORT_FIELDS = [
+  'lat', 'lon', 'status', 'quantity', 'species_known', 'species_name',
+  'request_community_id', 'trunk_measure_type', 'trunk_measure_cm',
+  'felling_reason', 'felling_reason_other', 'felling_date', 'felling_period',
+  'looking_for_arborist', 'arborist_contact', 'felled_date', 'felled_period', 'notes',
+] as const
+
+app.patch('/api/admin/reports/:id', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const body = await c.req.json<Record<string, unknown>>()
+  const keys = Object.keys(body).filter((k) => (EDITABLE_REPORT_FIELDS as readonly string[]).includes(k))
+  if (keys.length === 0) return c.json({ error: 'no editable fields in body' }, 400)
+  const setClause = keys.map((k) => `${k} = ?`).join(', ')
+  await c.env.DB.prepare(`UPDATE tree_reports SET ${setClause} WHERE id = ?`)
+    .bind(...keys.map((k) => body[k]), c.req.param('id'))
+    .run()
+  return c.json({ ok: true })
+})
+
 // Permanent removal - for a community report that's already live (approved)
 // and needs to come down, not just the pending-queue approve/reject above.
 // Cleans up its R2 photo too, so a deleted report doesn't leave an orphaned
@@ -212,6 +236,19 @@ app.get('/api/admin/permits/pending', async (c) => {
   return c.json(results)
 })
 
+// Already-live permits - mirrors /api/admin/reports/approved above, so the
+// admin page can list and (for a manual mistake or a since-retracted permit)
+// delete something that's already on the public map, not just review the
+// pending queue.
+app.get('/api/admin/permits/approved', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const { results } = await c.env.DB.prepare(
+    `SELECT * FROM felling_permits WHERE review_status = 'approved' ORDER BY published_at DESC LIMIT 200`
+  ).all()
+  return c.json(results)
+})
+
 app.post('/api/admin/permits/:id/review', async (c) => {
   const unauthorized = requireAdmin(c)
   if (unauthorized) return unauthorized
@@ -220,6 +257,35 @@ app.post('/api/admin/permits/:id/review', async (c) => {
   await c.env.DB.prepare('UPDATE felling_permits SET review_status = ? WHERE id = ?')
     .bind(status, c.req.param('id'))
     .run()
+  return c.json({ ok: true })
+})
+
+// Editing a permit's own content (title, address, tree count, etc.) -
+// distinct from the review_status changes above. Same whitelist pattern as
+// the report edit endpoint.
+const EDITABLE_PERMIT_FIELDS = [
+  'title', 'title_en', 'address', 'lat', 'lon', 'tree_count', 'species', 'reason', 'status',
+] as const
+
+app.patch('/api/admin/permits/:id', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const body = await c.req.json<Record<string, unknown>>()
+  const keys = Object.keys(body).filter((k) => (EDITABLE_PERMIT_FIELDS as readonly string[]).includes(k))
+  if (keys.length === 0) return c.json({ error: 'no editable fields in body' }, 400)
+  const setClause = keys.map((k) => `${k} = ?`).join(', ')
+  await c.env.DB.prepare(`UPDATE felling_permits SET ${setClause} WHERE id = ?`)
+    .bind(...keys.map((k) => body[k]), c.req.param('id'))
+    .run()
+  return c.json({ ok: true })
+})
+
+// Permanent removal, mirroring the report delete endpoint above. Permits
+// have no R2 object to clean up alongside them.
+app.delete('/api/admin/permits/:id', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  await c.env.DB.prepare('DELETE FROM felling_permits WHERE id = ?').bind(c.req.param('id')).run()
   return c.json({ ok: true })
 })
 
