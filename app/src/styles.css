@@ -538,6 +538,26 @@ body {
 .admin-edit-form textarea { min-height: 50px; resize: vertical; }
 
 
+/* Satellite/map basemap toggle - a custom MapLibre control stacked above
+   the zoom buttons (see BasemapToggleControl in TreeMap.tsx). Riding on
+   maplibre-gl's own .maplibregl-ctrl-group for the white pill + shadow
+   that already matches the zoom control; only the button's own look
+   needs setting here since it's text, not an icon. */
+.basemap-toggle-btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 8px 10px;
+  border: none;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.basemap-toggle-btn:hover { background: var(--paper-dim); }
+.basemap-toggle-btn.active { background: var(--ink); color: var(--paper); }
+
 /* tree popup: "report this tree" note + button, at the bottom of the
    existing-tree spec sheet */
 .tree-popup-report {

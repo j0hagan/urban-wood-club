@@ -4,6 +4,69 @@ import 'maplibre-gl/dist/maplibre-gl.css'
 
 const DELFT_CENTER: [number, number] = [4.3571, 52.0116]
 
+// Basemap toggle: the default vector style (free, keyless CARTO Positron -
+// see the map-init effect below) vs. free, keyless Esri World Imagery
+// satellite tiles. A raster style has to be a full style object of its
+// own (one source, one layer) rather than a URL, since there's no free
+// keyless "satellite style.json" the way there is for the vector one.
+const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+const STYLE_SATELLITE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    'esri-satellite': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      attribution: 'Imagery &copy; Esri',
+    },
+  },
+  layers: [{ id: 'esri-satellite-layer', type: 'raster', source: 'esri-satellite', minzoom: 0, maxzoom: 19 }],
+}
+
+// A plain custom MapLibre control (maplibregl's own .maplibregl-ctrl /
+// -ctrl-group classes give it the same white pill + shadow as the zoom
+// buttons for free) - added to the map before NavigationControl below so
+// it stacks above the zoom buttons, per your request. setStyle() replaces
+// the whole style, which wipes any source/layer not declared in the new
+// style (our 'trees' GeoJSON layer included) - the trees-layer effect
+// further down listens for the map's own 'style.load' event and re-adds
+// it after every swap, satellite or back to the normal map.
+class BasemapToggleControl implements maplibregl.IControl {
+  private container?: HTMLDivElement
+  private button?: HTMLButtonElement
+  private map?: maplibregl.Map
+  private satellite = false
+
+  onAdd(map: maplibregl.Map) {
+    this.map = map
+    this.container = document.createElement('div')
+    this.container.className = 'maplibregl-ctrl maplibregl-ctrl-group basemap-toggle-ctrl'
+    this.button = document.createElement('button')
+    this.button.type = 'button'
+    this.button.className = 'basemap-toggle-btn'
+    this.button.title = 'Toggle satellite view'
+    this.button.textContent = 'Satellite'
+    this.button.addEventListener('click', () => this.toggle())
+    this.container.appendChild(this.button)
+    return this.container
+  }
+
+  onRemove() {
+    this.container?.remove()
+    this.map = undefined
+  }
+
+  private toggle() {
+    if (!this.map || !this.button) return
+    this.satellite = !this.satellite
+    this.button.textContent = this.satellite ? 'Map' : 'Satellite'
+    this.button.classList.toggle('active', this.satellite)
+    this.map.setStyle(this.satellite ? STYLE_SATELLITE : STYLE_LIGHT)
+  }
+}
+
 interface Tree {
   id: string
   lat: number
@@ -433,21 +496,34 @@ export default function TreeMap({
   const [trees, setTrees] = useState<Tree[]>([])
   const [permits, setPermits] = useState<Permit[]>([])
   const [reports, setReports] = useState<Report[]>([])
+  // Bumped on every 'style.load' (initial load AND every later setStyle
+  // from the satellite toggle) so the trees-layer effect below knows to
+  // re-check whether it needs to re-add its source/layer.
+  const [styleVersion, setStyleVersion] = useState(0)
+  // Guards the trees-circle hover/click handlers so they're only ever
+  // registered once for the map's lifetime - see that effect's own
+  // comment for why re-registering them after every style swap would
+  // stack up duplicate handlers instead of just resuming for free.
+  const treeHandlersBoundRef = useRef(false)
 
   // map init (once)
   useEffect(() => {
     if (!containerRef.current) return
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json', // free, keyless CARTO basemap
+      style: STYLE_LIGHT, // free, keyless CARTO basemap
       center: DELFT_CENTER,
       zoom: 13,
     })
     mapRef.current = map
+    // Satellite toggle above the zoom buttons, per your request - added
+    // first so it stacks above NavigationControl in the same corner.
+    map.addControl(new BasemapToggleControl(), 'top-right')
     // Zoom in/out buttons, per your request - compass/rotate control left
     // off since this map never rotates.
     map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'top-right')
     map.on('load', () => setMapLoaded(true))
+    map.on('style.load', () => setStyleVersion((v) => v + 1))
     return () => map.remove()
   }, [])
 
@@ -541,44 +617,57 @@ export default function TreeMap({
         'circle-opacity': 0.9,
       },
     })
-    map.on('mouseenter', 'trees-circle', () => (map.getCanvas().style.cursor = 'pointer'))
-    map.on('mouseleave', 'trees-circle', () => (map.getCanvas().style.cursor = ''))
-    map.on('click', 'trees-circle', (e) => {
-      const feature = e.features?.[0]
-      if (!feature || feature.geometry.type !== 'Point') return
-      const tree = feature.properties as Tree
 
-      // setHTML() replaces the popup's innerHTML wholesale, which drops any
-      // listener bound to a previous render - so the "Report this tree"
-      // button has to be rewired after every setHTML() call, not just once.
-      const wireReportButton = () => {
-        popup
-          .getElement()
-          ?.querySelector('.tree-popup-report-btn')
-          ?.addEventListener('click', () => onReportTree?.(tree.lat, tree.lon))
-      }
+    // Registered once ever, not once per style swap: MapLibre's layer-
+    // scoped listeners are keyed by layer id against whatever's in the
+    // CURRENT style, not tied to this particular layer instance - once a
+    // 'trees-circle' layer exists again after setStyle(), these resume
+    // firing on their own. Re-registering here on every swap would just
+    // stack up duplicate handlers (and duplicate popups per click) instead.
+    if (!treeHandlersBoundRef.current) {
+      treeHandlersBoundRef.current = true
+      map.on('mouseenter', 'trees-circle', () => (map.getCanvas().style.cursor = 'pointer'))
+      map.on('mouseleave', 'trees-circle', () => (map.getCanvas().style.cursor = ''))
+      map.on('click', 'trees-circle', (e) => {
+        const feature = e.features?.[0]
+        if (!feature || feature.geometry.type !== 'Point') return
+        const tree = feature.properties as Tree
 
-      // Default maplibre popups cap out at 240px wide - too narrow for the
-      // now-doubled .tree-popup-wide layout, so this one gets an explicit
-      // wider cap.
-      const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
-        .setLngLat(feature.geometry.coordinates as [number, number])
-        .setHTML(treePopupHtml(tree, null, !!tree.species_nl))
-        .addTo(map)
-      wireReportButton()
+        // setHTML() replaces the popup's innerHTML wholesale, which drops any
+        // listener bound to a previous render - so the "Report this tree"
+        // button has to be rewired after every setHTML() call, not just once.
+        const wireReportButton = () => {
+          popup
+            .getElement()
+            ?.querySelector('.tree-popup-report-btn')
+            ?.addEventListener('click', () => onReportTree?.(tree.lat, tree.lon))
+        }
 
-      // Show what we already have instantly, then fill in the English/Dutch
-      // common names + Wikipedia links once the Wikidata lookup resolves -
-      // no reason to make the click wait on a network round-trip.
-      if (tree.species_nl) {
-        lookupSpeciesInfo(tree.species_nl).then((info) => {
-          if (!popup.isOpen()) return
-          popup.setHTML(treePopupHtml(tree, info, false))
-          wireReportButton()
-        })
-      }
-    })
-  }, [trees, mapLoaded])
+        // Default maplibre popups cap out at 240px wide - too narrow for the
+        // now-doubled .tree-popup-wide layout, so this one gets an explicit
+        // wider cap.
+        const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+          .setLngLat(feature.geometry.coordinates as [number, number])
+          .setHTML(treePopupHtml(tree, null, !!tree.species_nl))
+          .addTo(map)
+        wireReportButton()
+
+        // Show what we already have instantly, then fill in the English/Dutch
+        // common names + Wikipedia links once the Wikidata lookup resolves -
+        // no reason to make the click wait on a network round-trip.
+        if (tree.species_nl) {
+          lookupSpeciesInfo(tree.species_nl).then((info) => {
+            if (!popup.isOpen()) return
+            popup.setHTML(treePopupHtml(tree, info, false))
+            wireReportButton()
+          })
+        }
+      })
+    }
+    // styleVersion: re-run after every setStyle() (the satellite toggle),
+    // since that wipes any source/layer not declared in the new style -
+    // this re-adds 'trees' from scratch each time, same as a fresh load.
+  }, [trees, mapLoaded, styleVersion])
 
   // toggle tree layer visibility
   useEffect(() => {
