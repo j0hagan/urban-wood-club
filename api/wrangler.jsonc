@@ -3,6 +3,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "logs": { "enabled": true, "invocation_logs": true, "persist": true }
+  },
   "d1_databases": [
     { "binding": "DB", "database_name": "urban-wood-club", "database_id": "0ed21153-04a4-427d-bcb8-e0f1acb7de6f" }
   ],
