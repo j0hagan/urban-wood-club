@@ -144,7 +144,7 @@ type ReportSummary = {
   created_at?: string
 }
 
-type Layers = { trees: boolean; permits: boolean; reports: boolean }
+type Layers = { trees: boolean; permits: boolean; inventory: boolean; reports: boolean }
 
 const STATUS_LABEL: Record<Report['status'], string> = {
   marked_for_felling: 'Marked for felling',
@@ -501,8 +501,10 @@ export default function TreeMap({
   onCounts?: (counts: {
     trees: number
     permits: number
+    inventory: number
     reports: number
     permitTreeTotal: number
+    inventoryTreeTotal: number
   }) => void
   onReportTree?: (lat: number, lon: number) => void
   onReportsChange?: (reports: ReportSummary[]) => void
@@ -602,11 +604,24 @@ export default function TreeMap({
   // unknown tree_count (null/undefined - the count couldn't be parsed from
   // the notice title) are skipped rather than counted as 0.
   useEffect(() => {
-    const permitTreeTotal = permits.reduce(
-      (sum, p) => (typeof p.tree_count === 'number' ? sum + p.tree_count : sum),
-      0
-    )
-    onCounts?.({ trees: trees.length, permits: permits.length, reports: reports.length, permitTreeTotal })
+    // Felling permits (auto-scraped from the government permit feed,
+    // tier2/tier3) and Felling inventory (added by hand from a separate
+    // source such as the GRIB/Bomenwacht tree viewer, tier === 'manual')
+    // are two distinct layers now, each with its own toggle and count -
+    // split the raw `permits` list by tier rather than lumping every
+    // felling record into one number.
+    const officialPermits = permits.filter((p) => p.tier !== 'manual')
+    const manualPermits = permits.filter((p) => p.tier === 'manual')
+    const sumTrees = (list: Permit[]) =>
+      list.reduce((sum, p) => (typeof p.tree_count === 'number' ? sum + p.tree_count : sum), 0)
+    onCounts?.({
+      trees: trees.length,
+      permits: officialPermits.length,
+      inventory: manualPermits.length,
+      reports: reports.length,
+      permitTreeTotal: sumTrees(officialPermits),
+      inventoryTreeTotal: sumTrees(manualPermits),
+    })
   }, [trees, permits, reports, onCounts])
 
   // the sidebar keeps its own always-visible feed of community reports
@@ -747,23 +762,23 @@ export default function TreeMap({
     markersRef.current = []
     const isSatellite = !!map.getSource('esri-satellite')
 
-    if (layers.permits) {
-      permits.forEach((p) => {
-        if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
-        // Auto-scraped (Tier 2/3) permits stay yellow; one the admin added
-        // by hand (tier === 'manual', e.g. hand-checked against GRIB) gets
-        // its own orange so the two are visually distinguishable on the
-        // map itself, not just in the admin queue - keep in sync with
-        // --yellow/--orange in styles.css.
-        const marker = new maplibregl.Marker({
-          element: dotElement(p.tier === 'manual' ? '#d9772b' : '#e2b93d', isSatellite),
-        })
-          .setLngLat([p.lon, p.lat])
-          .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
-          .addTo(map)
-        markersRef.current.push(marker)
+    // Felling permits (yellow, tier2/tier3) and Felling inventory (orange,
+    // tier === 'manual') are independently toggleable layers - each permit
+    // is gated by its own layer's flag rather than one shared 'permits'
+    // toggle, so hiding one doesn't hide the other. Keep colors in sync
+    // with --yellow/--orange in styles.css.
+    permits.forEach((p) => {
+      if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
+      const isManual = p.tier === 'manual'
+      if (isManual ? !layers.inventory : !layers.permits) return
+      const marker = new maplibregl.Marker({
+        element: dotElement(isManual ? '#d9772b' : '#e2b93d', isSatellite),
       })
-    }
+        .setLngLat([p.lon, p.lat])
+        .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
+        .addTo(map)
+      markersRef.current.push(marker)
+    })
 
     if (layers.reports) {
       reports.forEach((r) => {
@@ -805,7 +820,7 @@ export default function TreeMap({
     // styleVersion: re-run after every setStyle() (the satellite toggle) so
     // these markers get rebuilt with the right ring color for whichever
     // basemap is now showing - see dotElement()'s isSatellite param above.
-  }, [trees, permits, reports, layers.permits, layers.reports, styleVersion])
+  }, [trees, permits, reports, layers.permits, layers.inventory, layers.reports, styleVersion])
 
   return <div ref={containerRef} className="map-container" />
 }

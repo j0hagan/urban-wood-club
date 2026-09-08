@@ -206,6 +206,18 @@ export default function AdminReview() {
     try {
       const body: Record<string, unknown> = { title, status: newPermit.status || 'aangevraagd' }
       if (newPermit.address?.trim()) body.address = newPermit.address.trim()
+      // Lat/Lon are the direct, preferred way to place a manual entry -
+      // exactly what a GRIB/Bomenwacht viewer record gives you (a
+      // coordinate, not a street address). Address alone still works and
+      // gets geocoded server-side, but only for real address text; typing
+      // a coordinate pair into the Address field (as happened the first
+      // time this form was used) silently fails to geocode and the pin
+      // never shows up, since the map only renders permits that already
+      // have coordinates.
+      if (newPermit.lat?.trim() && newPermit.lon?.trim()) {
+        body.lat = Number(newPermit.lat)
+        body.lon = Number(newPermit.lon)
+      }
       if (newPermit.tree_count?.trim()) body.tree_count = Number(newPermit.tree_count)
       if (newPermit.species?.trim()) body.species = newPermit.species.trim()
       if (newPermit.reason?.trim()) body.reason = newPermit.reason.trim()
@@ -572,11 +584,26 @@ export default function AdminReview() {
                 <input value={newPermit.reason ?? ''} onChange={(e) => newPermitField('reason', e.target.value)} />
               </label>
               <label>
-                Address
+                Latitude, Longitude (preferred - e.g. from GRIB)
+                <span className="admin-field-row">
+                  <input
+                    value={newPermit.lat ?? ''}
+                    onChange={(e) => newPermitField('lat', e.target.value)}
+                    placeholder="52.00526"
+                  />
+                  <input
+                    value={newPermit.lon ?? ''}
+                    onChange={(e) => newPermitField('lon', e.target.value)}
+                    placeholder="4.37174"
+                  />
+                </span>
+              </label>
+              <label>
+                Address (only if you don't have coordinates)
                 <input
                   value={newPermit.address ?? ''}
                   onChange={(e) => newPermitField('address', e.target.value)}
-                  placeholder="Geocoded automatically on save if left with no coordinates"
+                  placeholder="A real street address - geocoded automatically on save. Ignored if Lat/Lon above is filled in."
                 />
               </label>
               <label>

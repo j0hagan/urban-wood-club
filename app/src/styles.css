@@ -132,6 +132,7 @@ body {
 .swatch { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
 .swatch-tree { background: var(--green); }
 .swatch-permit { background: var(--yellow); }
+.swatch-inventory { background: var(--orange); }
 .swatch-report { background: var(--red); }
 .layer-count {
   margin-left: auto;
@@ -549,6 +550,11 @@ body {
   border-radius: 6px;
   background: var(--paper-dim);
 }
+/* Lat/Lon side by side in the "+ Add by hand" form, rather than one full
+   width row each - they're a single coordinate pair, not two separate
+   fields, so pairing them visually makes that relationship clear. */
+.admin-field-row { display: flex; gap: 8px; }
+.admin-field-row input { flex: 1; min-width: 0; }
 
 
 /* Satellite/map basemap toggle - a custom MapLibre control stacked above

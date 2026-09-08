@@ -360,14 +360,26 @@ app.post('/api/admin/permits', async (c) => {
   const address = typeof body.address === 'string' && body.address.trim() ? body.address.trim() : null
   let lat = typeof body.lat === 'number' ? body.lat : null
   let lon = typeof body.lon === 'number' ? body.lon : null
-  // No coordinates given directly but an address was - geocode it via the
-  // same free PDOK lookup Tier 2/3 already use, so the admin doesn't have
-  // to go find coordinates by hand for every manual entry.
   if ((lat == null || lon == null) && address) {
-    const coords = await geocodeAddress(address).catch(() => null)
-    if (coords) {
-      lat = coords.lat
-      lon = coords.lon
+    // The first real use of this endpoint had the admin type a coordinate
+    // pair ("52.00526, 4.37174") into the Address field instead of the
+    // dedicated Lat/Lon fields - PDOK's geocoder obviously can't resolve
+    // that as a street address, so it silently came back null and the
+    // record never got a map marker. Catch that shape directly rather
+    // than relying only on the frontend sending the right fields.
+    const coordMatch = address.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/)
+    if (coordMatch) {
+      lat = Number(coordMatch[1])
+      lon = Number(coordMatch[2])
+    } else {
+      // A real address - geocode it via the same free PDOK lookup Tier
+      // 2/3 already use, so the admin doesn't have to go find coordinates
+      // by hand for every manual entry.
+      const coords = await geocodeAddress(address).catch(() => null)
+      if (coords) {
+        lat = coords.lat
+        lon = coords.lon
+      }
     }
   }
   const treeCount = typeof body.tree_count === 'number' ? body.tree_count : null

@@ -1,4 +1,4 @@
-type Layers = { trees: boolean; permits: boolean; reports: boolean }
+type Layers = { trees: boolean; permits: boolean; inventory: boolean; reports: boolean }
 
 type ReportSummary = {
   id: string
@@ -14,7 +14,14 @@ const REPORT_STATUS_LABEL: Record<ReportSummary['status'], string> = {
   new_tree_planted: 'New tree planted',
 }
 
-type Counts = { trees: number; permits: number; reports: number; permitTreeTotal: number }
+type Counts = {
+  trees: number
+  permits: number
+  inventory: number
+  reports: number
+  permitTreeTotal: number
+  inventoryTreeTotal: number
+}
 
 // The brand mark/wordmark/nav lives at the page level (App.tsx renders it
 // as a <header> overlapping both this sidebar and the map) - everything
@@ -53,9 +60,16 @@ export default function Sidebar({
           </label>
           <label className="layer-row">
             <input type="checkbox" checked={layers.permits} onChange={() => onToggle('permits')} />
-            <span className="swatch swatch-permit" /> Planned felling
+            <span className="swatch swatch-permit" /> Felling permits
             <span className="layer-count">
               {counts.permits.toLocaleString()} ({counts.permitTreeTotal.toLocaleString()} trees)
+            </span>
+          </label>
+          <label className="layer-row">
+            <input type="checkbox" checked={layers.inventory} onChange={() => onToggle('inventory')} />
+            <span className="swatch swatch-inventory" /> Felling inventory
+            <span className="layer-count">
+              {counts.inventory.toLocaleString()} ({counts.inventoryTreeTotal.toLocaleString()} trees)
             </span>
           </label>
           <label className="layer-row">

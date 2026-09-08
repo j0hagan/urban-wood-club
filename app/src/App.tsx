@@ -3,7 +3,7 @@ import TreeMap from './components/TreeMap'
 import Sidebar from './components/Sidebar'
 import ReportWizard, { emptyReportForm, type ReportFormState } from './components/ReportWizard'
 
-type Layers = { trees: boolean; permits: boolean; reports: boolean }
+type Layers = { trees: boolean; permits: boolean; inventory: boolean; reports: boolean }
 
 // Trimmed shape of a community report for the sidebar's always-visible
 // feed - redeclared per-file to match this codebase's existing convention
@@ -135,7 +135,7 @@ function pageFromPath(pathname: string): Page {
 
 export default function App() {
   const [page, setPage] = useState<Page>(() => pageFromPath(window.location.pathname))
-  const [layers, setLayers] = useState<Layers>({ trees: true, permits: true, reports: true })
+  const [layers, setLayers] = useState<Layers>({ trees: true, permits: true, inventory: true, reports: true })
   // Mobile only: the sidebar's own Layers section is hidden under 780px
   // (see .layers-section in styles.css) in favor of this compact toggle
   // living on the map itself, right below the zoom control.
@@ -149,7 +149,7 @@ export default function App() {
 
   const [refreshKey, setRefreshKey] = useState(0)
   const [thanks, setThanks] = useState(false)
-  const [counts, setCounts] = useState({ trees: 0, permits: 0, reports: 0, permitTreeTotal: 0 })
+  const [counts, setCounts] = useState({ trees: 0, permits: 0, inventory: 0, reports: 0, permitTreeTotal: 0, inventoryTreeTotal: 0 })
   const [communityReports, setCommunityReports] = useState<ReportSummary[]>([])
 
   // Client-side routing for About/Projects/Contact - no router dependency,
@@ -308,8 +308,17 @@ export default function App() {
                 </label>
                 <label className="layer-row">
                   <input type="checkbox" checked={layers.permits} onChange={() => toggleLayer('permits')} />
-                  <span className="swatch swatch-permit" /> Planned felling
-                  <span className="layer-count">{counts.permits.toLocaleString()}</span>
+                  <span className="swatch swatch-permit" /> Felling permits
+                  <span className="layer-count">
+                    {counts.permits.toLocaleString()} ({counts.permitTreeTotal.toLocaleString()} trees)
+                  </span>
+                </label>
+                <label className="layer-row">
+                  <input type="checkbox" checked={layers.inventory} onChange={() => toggleLayer('inventory')} />
+                  <span className="swatch swatch-inventory" /> Felling inventory
+                  <span className="layer-count">
+                    {counts.inventory.toLocaleString()} ({counts.inventoryTreeTotal.toLocaleString()} trees)
+                  </span>
                 </label>
                 <label className="layer-row">
                   <input type="checkbox" checked={layers.reports} onChange={() => toggleLayer('reports')} />
