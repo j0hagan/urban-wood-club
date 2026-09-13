@@ -927,13 +927,6 @@ export default function TreeMap({
         popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
           inventoryPopupHtml(p, null, !!p.species_lat, nearestStandingTree)
         )
-        // Mirrors the community-report popup's own wiring pattern just below:
-        // the button only exists in the DOM once the popup has actually
-        // opened, so it has to be (re)wired on 'open', not right after
-        // setHTML() - and setHTML() itself has to be called again here
-        // (rather than assumed from the initial render above) since the
-        // species lookup below can resolve either before or after the first
-        // open, and a fresh setHTML() wipes any previously wired listener.
         const wireNearestTreeButton = () => {
           if (!nearestStandingTree) return
           popup
@@ -952,13 +945,30 @@ export default function TreeMap({
               }
             })
         }
-        popup.on('open', wireNearestTreeButton)
-        if (p.species_lat) {
-          lookupSpeciesInfo(p.species_lat).then((info) => {
-            popup.setHTML(inventoryPopupHtml(p, info, false, nearestStandingTree))
-            wireNearestTreeButton()
-          })
-        }
+        // The species lookup only ever starts once this specific popup is
+        // actually opened (guarded by speciesLookupStarted so re-opening the
+        // same popup doesn't re-fire it) - NOT eagerly for all ~500 markers
+        // on page load. An earlier version called lookupSpeciesInfo() (and
+        // the popup.setHTML() that applied its result) unconditionally right
+        // after creating every marker: that fired ~500 concurrent Wikidata
+        // requests on every page load, and updating a popup's HTML before it
+        // had ever been opened left MapLibre's Popup instance in a state
+        // where it could no longer be opened at all by a later click -
+        // exactly the "only green popups work" regression this replaced.
+        // Mirrors the trees-circle click handler's own on-demand pattern
+        // above, just triggered by 'open' instead of a canvas layer click.
+        let speciesLookupStarted = false
+        popup.on('open', () => {
+          wireNearestTreeButton()
+          if (p.species_lat && !speciesLookupStarted) {
+            speciesLookupStarted = true
+            lookupSpeciesInfo(p.species_lat).then((info) => {
+              if (!popup.isOpen()) return
+              popup.setHTML(inventoryPopupHtml(p, info, false, nearestStandingTree))
+              wireNearestTreeButton()
+            })
+          }
+        })
       } else {
         popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p))
       }
