@@ -668,6 +668,15 @@ body {
   display: flex;
   align-items: center;
   gap: 9px;
+  /* Clickable - flies to and opens this report's popup on the map (see
+     Sidebar.tsx's onSelectReport / TreeMap.tsx's focusReportId). */
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.report-feed-item:hover, .report-feed-item:focus-visible {
+  background: var(--paper-dim);
+  outline: none;
 }
 .report-feed-thumb {
   width: 38px;

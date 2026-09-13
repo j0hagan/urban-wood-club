@@ -39,6 +39,7 @@ export default function Sidebar({
   onStartReport,
   reporting,
   showMapPanels,
+  onSelectReport,
 }: {
   layers: Layers
   counts: Counts
@@ -50,6 +51,9 @@ export default function Sidebar({
   // reports are map-specific, so they drop out there; "Report a tree"
   // stays either way.
   showMapPanels: boolean
+  // Clicking a report in the feed below flies to it on the map and opens
+  // its popup there (see TreeMap.tsx's focusReportId).
+  onSelectReport?: (id: string) => void
 }) {
   return (
     <aside className="sidebar">
@@ -101,7 +105,16 @@ export default function Sidebar({
           ) : (
             <ul className="report-feed">
               {reports.map((r) => (
-                <li key={r.id} className="report-feed-item">
+                <li
+                  key={r.id}
+                  className="report-feed-item"
+                  onClick={() => onSelectReport?.(r.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') onSelectReport?.(r.id)
+                  }}
+                >
                   <img className="report-feed-thumb" src={r.photo_url} alt="" loading="lazy" />
                   <div className="report-feed-text">
                     <strong>{REPORT_STATUS_LABEL[r.status]}</strong>

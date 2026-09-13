@@ -182,17 +182,43 @@ const PERMIT_STATUS_LABEL: Record<string, string> = {
 // Small colored-dot markers (rather than MapLibre's default big teardrop
 // pin) - closer to urbanwood.club's map style, and much lighter-weight
 // for the handful of permit/report pins on screen at once.
-function dotElement(color: string, isSatellite: boolean): HTMLDivElement {
+// Same zoom -> radius breakpoints as the trees-circle layer's own
+// circle-radius paint property below, so the DOM-element permit/inventory/
+// report dots end up the same visual size as the green circle-layer trees
+// at every zoom level instead of sitting fixed-size and looking oversized
+// whenever you zoom out.
+const DOT_RADIUS_STOPS: [number, number][] = [
+  [10, 2],
+  [14, 3.2],
+  [18, 5.5],
+]
+
+function dotRadiusForZoom(zoom: number): number {
+  if (zoom <= DOT_RADIUS_STOPS[0][0]) return DOT_RADIUS_STOPS[0][1]
+  const last = DOT_RADIUS_STOPS[DOT_RADIUS_STOPS.length - 1]
+  if (zoom >= last[0]) return last[1]
+  for (let i = 0; i < DOT_RADIUS_STOPS.length - 1; i++) {
+    const [z0, r0] = DOT_RADIUS_STOPS[i]
+    const [z1, r1] = DOT_RADIUS_STOPS[i + 1]
+    if (zoom >= z0 && zoom <= z1) return r0 + ((zoom - z0) / (z1 - z0)) * (r1 - r0)
+  }
+  return last[1]
+}
+
+function dotElement(color: string, isSatellite: boolean, zoom: number): HTMLDivElement {
   const el = document.createElement('div')
-  el.style.width = '13px'
-  el.style.height = '13px'
+  const diameter = dotRadiusForZoom(zoom) * 2
+  el.style.width = `${diameter}px`
+  el.style.height = `${diameter}px`
   el.style.borderRadius = '50%'
   el.style.background = color
   // A white ring reads fine against the flat CARTO map style but disappears
   // (or looks washed-out) against real aerial photography - switch to a
   // dark ink ring over satellite imagery instead, same idea as the
-  // trees-circle layer's own satellite-aware stroke below.
-  el.style.border = isSatellite ? '2px solid #17130f' : '2px solid #fbfaf5'
+  // trees-circle layer's own satellite-aware stroke below. 1px to match
+  // that layer's circle-stroke-width, now that the dots are sized to match
+  // it too.
+  el.style.border = isSatellite ? '1px solid #17130f' : '1px solid #fbfaf5'
   el.style.boxShadow = '0 1px 3px rgba(23,19,15,0.45)'
   // These dot markers sit visually on top of the map canvas, but a DOM
   // click event still bubbles up through the map container after it fires
@@ -616,6 +642,8 @@ export default function TreeMap({
   onCounts,
   onReportTree,
   onReportsChange,
+  focusReportId,
+  onFocusReportHandled,
 }: {
   layers: Layers
   pickMode: boolean
@@ -634,10 +662,19 @@ export default function TreeMap({
   }) => void
   onReportTree?: (lat: number, lon: number) => void
   onReportsChange?: (reports: ReportSummary[]) => void
+  // Sidebar's community-report feed -> map: which report id (if any) to
+  // fly to and open the popup for, and how to tell App.tsx it's been
+  // handled so the same click can be repeated later.
+  focusReportId?: string | null
+  onFocusReportHandled?: () => void
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const markersRef = useRef<maplibregl.Marker[]>([])
+  // Keyed by report id, so the sidebar's "click a report to open its
+  // popup" feature (focusReportId above) can find the right marker
+  // without scanning markersRef (which also holds permit/inventory dots).
+  const reportMarkersRef = useRef<Record<string, maplibregl.Marker>>({})
   // Only one popup (tree, permit, or community report) open at a time -
   // every popup below is wired through registerPopup() before it's ever
   // shown, so whichever one opens next closes whatever was open before it.
@@ -698,6 +735,19 @@ export default function TreeMap({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false, showZoom: true }), 'top-right')
     map.on('load', () => setMapLoaded(true))
     map.on('style.load', () => setStyleVersion((v) => v + 1))
+    // Keeps every DOM-element dot marker (permit/inventory/report) in sync
+    // with the trees-circle layer's own zoom-based circle-radius as the
+    // user zooms, rather than only sizing them once at creation time -
+    // dotRadiusForZoom() above uses the exact same breakpoints as that
+    // layer's paint property.
+    map.on('zoom', () => {
+      const diameter = dotRadiusForZoom(map.getZoom()) * 2
+      for (const marker of markersRef.current) {
+        const el = marker.getElement()
+        el.style.width = `${diameter}px`
+        el.style.height = `${diameter}px`
+      }
+    })
     return () => map.remove()
   }, [])
 
@@ -895,6 +945,7 @@ export default function TreeMap({
     if (!map) return
     markersRef.current.forEach((m) => m.remove())
     markersRef.current = []
+    reportMarkersRef.current = {}
     const isSatellite = !!map.getSource('esri-satellite')
 
     // Felling permits (yellow, tier2/tier3) and Felling inventory (orange
@@ -972,7 +1023,7 @@ export default function TreeMap({
       } else {
         popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p))
       }
-      const marker = new maplibregl.Marker({ element: dotElement(color, isSatellite) })
+      const marker = new maplibregl.Marker({ element: dotElement(color, isSatellite, map.getZoom()) })
         .setLngLat([p.lon, p.lat])
         .setPopup(popup)
         .addTo(map)
@@ -1009,17 +1060,33 @@ export default function TreeMap({
               })
           })
         }
-        const marker = new maplibregl.Marker({ element: dotElement('#c33a26', isSatellite) }) // keep in sync with --red
+        const marker = new maplibregl.Marker({ element: dotElement('#c33a26', isSatellite, map.getZoom()) }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
           .setPopup(reportPopup)
           .addTo(map)
         markersRef.current.push(marker)
+        reportMarkersRef.current[r.id] = marker
       })
     }
     // styleVersion: re-run after every setStyle() (the satellite toggle) so
     // these markers get rebuilt with the right ring color for whichever
     // basemap is now showing - see dotElement()'s isSatellite param above.
   }, [trees, permits, reports, layers.permits, layers.inventory, layers.reports, styleVersion])
+
+  // Sidebar -> map: clicking a report in the always-visible community-report
+  // feed (Sidebar.tsx) flies to its marker and opens its popup, the same
+  // popup a direct map click would show - App.tsx also force-enables the
+  // reports layer before setting focusReportId, so the marker is guaranteed
+  // to exist by the time this runs.
+  useEffect(() => {
+    if (!focusReportId) return
+    const marker = reportMarkersRef.current[focusReportId]
+    const map = mapRef.current
+    if (!marker || !map) return
+    map.flyTo({ center: marker.getLngLat(), zoom: Math.max(map.getZoom(), 16) })
+    marker.togglePopup()
+    onFocusReportHandled?.()
+  }, [focusReportId, reports])
 
   return <div ref={containerRef} className="map-container" />
 }

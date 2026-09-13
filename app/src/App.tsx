@@ -161,6 +161,16 @@ export default function App() {
     inventoryAlreadyFelled: 0,
   })
   const [communityReports, setCommunityReports] = useState<ReportSummary[]>([])
+  // Sidebar's community-report feed -> map: which report id (if any) to
+  // fly to and open the popup for (see TreeMap.tsx's focusReportId prop).
+  const [focusReportId, setFocusReportId] = useState<string | null>(null)
+
+  function selectReport(id: string) {
+    // Force the reports layer on first, so TreeMap has actually built a
+    // marker for this id by the time the focus effect there runs.
+    setLayers((l) => (l.reports ? l : { ...l, reports: true }))
+    setFocusReportId(id)
+  }
 
   // Client-side routing for About/Projects/Contact - no router dependency,
   // same spirit as main.tsx's plain pathname check for /admin. The map
@@ -282,6 +292,7 @@ export default function App() {
         reporting={step > 0}
         onStartReport={startReport}
         showMapPanels={page === 'map'}
+        onSelectReport={selectReport}
       />
       <main className="map-area">
         {page === 'map' && (
@@ -293,6 +304,8 @@ export default function App() {
             onCounts={setCounts}
             onReportTree={reportThisTree}
             onReportsChange={setCommunityReports}
+            focusReportId={focusReportId}
+            onFocusReportHandled={() => setFocusReportId(null)}
           />
         )}
         {page !== 'map' && <WipPage />}
