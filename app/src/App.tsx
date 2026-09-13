@@ -149,7 +149,17 @@ export default function App() {
 
   const [refreshKey, setRefreshKey] = useState(0)
   const [thanks, setThanks] = useState(false)
-  const [counts, setCounts] = useState({ trees: 0, permits: 0, inventory: 0, reports: 0, permitTreeTotal: 0, inventoryTreeTotal: 0 })
+  const [counts, setCounts] = useState({
+    trees: 0,
+    permits: 0,
+    inventory: 0,
+    reports: 0,
+    permitTreeTotal: 0,
+    inventoryTreeTotal: 0,
+    inventoryRequiresPermit: 0,
+    inventoryNoPermit: 0,
+    inventoryAlreadyFelled: 0,
+  })
   const [communityReports, setCommunityReports] = useState<ReportSummary[]>([])
 
   // Client-side routing for About/Projects/Contact - no router dependency,
@@ -316,10 +326,15 @@ export default function App() {
                 <label className="layer-row">
                   <input type="checkbox" checked={layers.inventory} onChange={() => toggleLayer('inventory')} />
                   <span className="swatch swatch-inventory" /> Felling inventory
-                  <span className="layer-count">
-                    {counts.inventory.toLocaleString()} ({counts.inventoryTreeTotal.toLocaleString()} trees)
-                  </span>
+                  <span className="layer-count">{counts.inventory.toLocaleString()}</span>
                 </label>
+                {(counts.inventoryRequiresPermit > 0 || counts.inventoryNoPermit > 0 || counts.inventoryAlreadyFelled > 0) && (
+                  <div className="layer-subrow">
+                    <span className="swatch swatch-inventory" /> {counts.inventoryRequiresPermit.toLocaleString()} need a permit
+                    <span className="swatch swatch-inventory-light" /> {counts.inventoryNoPermit.toLocaleString()} don&apos;t
+                    <span className="swatch swatch-report" /> {counts.inventoryAlreadyFelled.toLocaleString()} already felled
+                  </div>
+                )}
                 <label className="layer-row">
                   <input type="checkbox" checked={layers.reports} onChange={() => toggleLayer('reports')} />
                   <span className="swatch swatch-report" /> Community reports

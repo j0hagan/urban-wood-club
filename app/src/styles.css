@@ -17,8 +17,9 @@
   --line: #ddd6c4;
   --green: #3f6b46;   /* existing trees */
   --yellow: #e2b93d;  /* planned felling (auto-scraped from Tier 2/3) - mirrors the poster's highlighter */
-  --orange: #d9772b;  /* planned felling, added by hand in /admin (e.g. from GRIB) - distinct from the auto-scraped yellow */
-  --red: #c33a26;     /* community reports - mirrors the poster's dashed-line annotation */
+  --orange: #d9772b;  /* Felling inventory (GRIB import / hand-added in /admin), permit required - distinct from the auto-scraped yellow */
+  --orange-light: #f0b072; /* Felling inventory, no permit needed - same dataset, lighter shade (see TreeMap.tsx's marker-color comment) */
+  --red: #c33a26;     /* community reports, and a Felling inventory tree GRIB's own survey already found gone or stump-only */
 }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -133,6 +134,7 @@ body {
 .swatch-tree { background: var(--green); }
 .swatch-permit { background: var(--yellow); }
 .swatch-inventory { background: var(--orange); }
+.swatch-inventory-light { background: var(--orange-light); }
 .swatch-report { background: var(--red); }
 .layer-count {
   margin-left: auto;
@@ -140,6 +142,19 @@ body {
   font-variant-numeric: tabular-nums;
   color: #83795f;
 }
+/* Legend line under "Felling inventory" breaking its one toggle down by
+   the GRIB import's own three marker colors (see TreeMap.tsx's
+   marker-color comment) - not a control of its own, just a key. */
+.layer-subrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: #83795f;
+  margin: -4px 0 9px 20px;
+}
+.layer-subrow .swatch { width: 8px; height: 8px; }
 
 .report-btn, .wizard-actions button {
   font: inherit;
@@ -365,6 +380,21 @@ body {
   object-fit: cover;
   border-radius: 4px;
   margin-bottom: 8px;
+}
+/* GRIB felling-inventory popup only (inventoryPopupHtml in TreeMap.tsx) -
+   these photos are rotated to portrait at import time specifically so the
+   whole tree is visible, so unlike .tree-popup-photo above this frames
+   tall/narrow rather than wide/cropped: contain instead of cover, height-
+   led instead of width-led, centered since the source photos vary in
+   aspect ratio after rotation. */
+.inventory-popup-photo {
+  display: block;
+  max-height: 320px;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  margin: 0 auto 8px;
 }
 .tree-popup h3 {
   font-family: "Times New Roman", Times, serif;

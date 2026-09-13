@@ -38,6 +38,13 @@ type PendingPermit = {
   tier: string
   source_url: string
   published_at: string
+  // GRIB tree-by-tree inventory import only (POST /api/admin/inventory/import) -
+  // undefined for Tier 2/3 and a plain "+ Add by hand" record.
+  photo_url?: string | null
+  species_en?: string | null
+  species_lat?: string | null
+  requires_permit?: number | null
+  already_felled?: number | null
 }
 
 type Tab = 'reports' | 'permits'
@@ -629,11 +636,13 @@ export default function AdminReview() {
               )}
               {permits?.map((p) => (
                 <li key={p.id} className="admin-card">
+                  {p.photo_url && <img className="admin-photo" src={p.photo_url} alt="" loading="lazy" />}
                   <div className="admin-card-body">
                     <div className="admin-card-title">
                       {p.title}
                       {p.tier === 'tier3' && <span className="tier3-badge">Tier 3 · attachment scan</span>}
                       {p.tier === 'manual' && <span className="manual-badge">Added by hand</span>}
+                      {!!p.already_felled && <span className="tier3-badge">Already felled/stump</span>}
                     </div>
                     {editingId === p.id ? (
                       <div className="admin-edit-form">

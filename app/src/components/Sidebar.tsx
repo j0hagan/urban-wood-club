@@ -21,6 +21,9 @@ type Counts = {
   reports: number
   permitTreeTotal: number
   inventoryTreeTotal: number
+  inventoryRequiresPermit: number
+  inventoryNoPermit: number
+  inventoryAlreadyFelled: number
 }
 
 // The brand mark/wordmark/nav lives at the page level (App.tsx renders it
@@ -68,10 +71,20 @@ export default function Sidebar({
           <label className="layer-row">
             <input type="checkbox" checked={layers.inventory} onChange={() => onToggle('inventory')} />
             <span className="swatch swatch-inventory" /> Felling inventory
-            <span className="layer-count">
-              {counts.inventory.toLocaleString()} ({counts.inventoryTreeTotal.toLocaleString()} trees)
-            </span>
+            <span className="layer-count">{counts.inventory.toLocaleString()}</span>
           </label>
+          {/* The GRIB tree-by-tree import - see TreeMap.tsx's marker-color
+              comment - splits Felling inventory into three colors within
+              that one toggle: this line is the legend for the three, not a
+              separate control. Stays empty (all three zero) until that
+              import has actually run. */}
+          {(counts.inventoryRequiresPermit > 0 || counts.inventoryNoPermit > 0 || counts.inventoryAlreadyFelled > 0) && (
+            <div className="layer-subrow">
+              <span className="swatch swatch-inventory" /> {counts.inventoryRequiresPermit.toLocaleString()} need a permit
+              <span className="swatch swatch-inventory-light" /> {counts.inventoryNoPermit.toLocaleString()} don&apos;t
+              <span className="swatch swatch-report" /> {counts.inventoryAlreadyFelled.toLocaleString()} already felled
+            </div>
+          )}
           <label className="layer-row">
             <input type="checkbox" checked={layers.reports} onChange={() => onToggle('reports')} />
             <span className="swatch swatch-report" /> Community reports
