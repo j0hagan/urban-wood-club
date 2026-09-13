@@ -119,6 +119,15 @@ type Permit = {
   neighborhood?: string | null
   reason_en?: string | null
   photo_url?: string | null
+  // GRIB field-survey detail (see migrate_2026_09_13_inventory_details.sql) -
+  // null for anything not from the GRIB bulk import.
+  planted_year?: number | null
+  age_years?: number | null
+  trunk_diameter_class?: string | null
+  height_class?: string | null
+  tree_size_class?: string | null
+  condition_nl?: string | null
+  condition_en?: string | null
 }
 type Report = {
   id: string
@@ -455,13 +464,45 @@ function permitPopupHtml(p: Permit): string {
 // import step's own notes), species in three languages, and a permit-
 // required flag that's independent of the felling reason. Same fixed-row,
 // em-dash-for-missing spec-sheet convention as the other two popups.
-function inventoryPopupHtml(p: Permit): string {
+// info/loadingInfo mirror treePopupHtml's own Wikidata lookup pattern - see
+// lookupSpeciesInfo above - so a species reads identically (same common
+// names, same Wikipedia links) whether it's a green municipal tree or a
+// GRIB inventory tree, rather than trusting this import's own hand-typed
+// translation dictionary as the final word. That dictionary's species_en/
+// species_nl are kept as the instant fallback while the lookup resolves,
+// and as the permanent fallback for anything Wikidata has no entry for.
+// nearestStandingTree - only ever passed for an already-felled/stump entry
+// (see the marker-creation effect below) - mirrors reportPopupHtml's own
+// "See the original tree record" cross-link for a felled community report:
+// same idea, same 20m findNearestTree() helper, just the other direction
+// (from the felling record TO whatever Tier 1 record still stands nearby).
+function inventoryPopupHtml(
+  p: Permit,
+  info?: SpeciesInfo | null,
+  loadingInfo?: boolean,
+  nearestStandingTree?: Tree | null
+): string {
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+  const rawRow = (label: string, html: string) => `<div class="tree-popup-row"><span>${label}</span><strong>${html}</strong></div>`
 
-  const heading = p.species_en ?? p.species_nl ?? 'Unspecified species'
+  const englishValue = loadingInfo ? '…' : (info?.en ?? p.species_en ?? null)
+  const dutchValue = loadingInfo ? '…' : (info?.nl ?? p.species_nl ?? null)
+  const heading = (loadingInfo ? p.species_en ?? p.species_nl : englishValue ?? dutchValue) ?? 'Unspecified species'
+
+  const wikiHtml = loadingInfo
+    ? 'Looking up&hellip;'
+    : info && (info.enUrl || info.nlUrl)
+      ? [
+          info.enUrl ? `<a href="${info.enUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (EN)</a>` : '',
+          info.nlUrl ? `<a href="${info.nlUrl}" target="_blank" rel="noopener noreferrer">Wikipedia (NL)</a>` : '',
+        ]
+          .filter(Boolean)
+          .join(' &middot; ')
+      : '—'
+
   const photoHtml = p.photo_url
-    ? `<img class="inventory-popup-photo" src="${p.photo_url}" alt="${escapeHtml(heading)}" />`
+    ? `<img class="inventory-popup-photo" src="${p.photo_url}" alt="${escapeHtml(String(heading))}" />`
     : ''
 
   const permitValue = p.requires_permit ? 'Yes — permit required' : 'No — no permit needed'
@@ -471,18 +512,35 @@ function inventoryPopupHtml(p: Permit): string {
        <div class="tree-popup-original">${escapeHtml(p.reason ?? '')}</div>`
     : row('Reason for felling', p.reason)
 
+  const nearestTreeHtml =
+    p.already_felled && nearestStandingTree
+      ? `
+      <div class="tree-popup-report">
+        <p>This one's recorded as already felled or stump-only - here's the nearest still-standing municipal tree record nearby, in case it's the same tree.</p>
+        <button type="button" class="tree-popup-original-btn">See nearby standing tree record</button>
+      </div>`
+      : ''
+
   return `
     <div class="tree-popup tree-popup-wide">
       ${photoHtml}
-      <h3>${escapeHtml(heading)}</h3>
-      ${row('Dutch name', p.species_nl)}
+      <h3>${escapeHtml(String(heading))}</h3>
+      ${row('Dutch name', dutchValue)}
       ${row('Scientific name', p.species_lat)}
+      ${rawRow('More info on species', wikiHtml)}
       ${row('Permit required', permitValue)}
       ${row('Status', statusValue)}
       ${reasonHtml}
+      ${row('Trunk diameter', p.trunk_diameter_class)}
+      ${row('Height', p.height_class)}
+      ${row('Tree size class', p.tree_size_class)}
+      ${row('Condition', p.condition_en ?? p.condition_nl)}
+      ${row('Planted', p.planted_year)}
+      ${row('Age (as surveyed)', p.age_years != null ? `${p.age_years} years` : null)}
       ${row('Address', p.address)}
       ${row('Neighborhood', p.neighborhood)}
       ${row('Source', 'Gemeente Delft tree register (GRIB)')}
+      ${nearestTreeHtml}
     </div>
   `
 }
@@ -860,13 +918,53 @@ export default function TreeMap({
       if (isManual) {
         color = p.already_felled ? '#c33a26' : p.requires_permit ? '#d9772b' : '#f0b072'
       }
+      let popup: maplibregl.Popup
+      if (isGribInventory) {
+        // Same "nearest tree within 20m" cross-link reportPopupHtml already
+        // uses for a felled community report, applied the other direction -
+        // only worth computing for a tree this record itself says is gone.
+        const nearestStandingTree = p.already_felled ? findNearestTree(p.lat, p.lon, trees) : null
+        popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
+          inventoryPopupHtml(p, null, !!p.species_lat, nearestStandingTree)
+        )
+        // Mirrors the community-report popup's own wiring pattern just below:
+        // the button only exists in the DOM once the popup has actually
+        // opened, so it has to be (re)wired on 'open', not right after
+        // setHTML() - and setHTML() itself has to be called again here
+        // (rather than assumed from the initial render above) since the
+        // species lookup below can resolve either before or after the first
+        // open, and a fresh setHTML() wipes any previously wired listener.
+        const wireNearestTreeButton = () => {
+          if (!nearestStandingTree) return
+          popup
+            .getElement()
+            ?.querySelector('.tree-popup-original-btn')
+            ?.addEventListener('click', () => {
+              const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+                .setLngLat([nearestStandingTree.lon, nearestStandingTree.lat])
+                .setHTML(treePopupHtml(nearestStandingTree, null, !!nearestStandingTree.species_nl))
+                .addTo(map)
+              if (nearestStandingTree.species_nl) {
+                lookupSpeciesInfo(nearestStandingTree.species_nl).then((info) => {
+                  if (!treePopup.isOpen()) return
+                  treePopup.setHTML(treePopupHtml(nearestStandingTree, info, false))
+                })
+              }
+            })
+        }
+        popup.on('open', wireNearestTreeButton)
+        if (p.species_lat) {
+          lookupSpeciesInfo(p.species_lat).then((info) => {
+            popup.setHTML(inventoryPopupHtml(p, info, false, nearestStandingTree))
+            wireNearestTreeButton()
+          })
+        }
+      } else {
+        popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p))
+      }
       const marker = new maplibregl.Marker({ element: dotElement(color, isSatellite) })
         .setLngLat([p.lon, p.lat])
-        .setPopup(
-          registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
-            isGribInventory ? inventoryPopupHtml(p) : permitPopupHtml(p)
-          )
-        )
+        .setPopup(popup)
         .addTo(map)
       markersRef.current.push(marker)
     })

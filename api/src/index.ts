@@ -47,18 +47,44 @@ app.get('/api/trees', async (c) => {
   return c.json(results)
 })
 
-// Tier 2 + 3 (auto-approved on sync - see run.ts; this only ever excludes a record someone explicitly rejected by hand)
+// Tier 2 + 3 + manual (auto-approved on sync - see run.ts; this only ever
+// excludes a record someone explicitly rejected by hand). LIMIT bumped from
+// 500 - the one-time GRIB bulk import (tier = 'manual') alone adds ~504
+// rows on top of whatever Tier 2/3 already has, so 500 would silently clip
+// the feed right around that dataset's own size.
 app.get('/api/permits', async (c) => {
   const status = c.req.query('status')
   const stmt = status
     ? c.env.DB.prepare(
-        `SELECT * FROM felling_permits WHERE review_status = 'approved' AND status = ? ORDER BY published_at DESC LIMIT 500`
+        `SELECT * FROM felling_permits WHERE review_status = 'approved' AND status = ? ORDER BY published_at DESC LIMIT 2000`
       ).bind(status)
     : c.env.DB.prepare(
-        `SELECT * FROM felling_permits WHERE review_status = 'approved' ORDER BY published_at DESC LIMIT 500`
+        `SELECT * FROM felling_permits WHERE review_status = 'approved' ORDER BY published_at DESC LIMIT 2000`
       )
   const { results } = await stmt.all()
-  return c.json(results)
+  // photo_r2_key is internal (and, more importantly, never exposed raw -
+  // see the GRIB import's own comment on why the original grib.app photo
+  // URLs never get stored here at all) - map it to a servable URL the same
+  // way /api/reports already does for tree_reports' photo_r2_key.
+  return c.json(
+    (results as Record<string, unknown>[]).map(({ photo_r2_key, ...rest }) => ({
+      ...rest,
+      photo_url: photo_r2_key ? `/api/permits/${rest.id}/photo` : null,
+    }))
+  )
+})
+
+app.get('/api/permits/:id/photo', async (c) => {
+  const id = c.req.param('id')
+  const row = await c.env.DB.prepare('SELECT photo_r2_key FROM felling_permits WHERE id = ?')
+    .bind(id)
+    .first<{ photo_r2_key: string | null }>()
+  if (!row?.photo_r2_key) return c.notFound()
+  const obj = await c.env.PHOTOS.get(row.photo_r2_key)
+  if (!obj) return c.notFound()
+  return new Response(obj.body, {
+    headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream' },
+  })
 })
 
 // Tier 4: "Witness a Tree" community reports
@@ -286,26 +312,35 @@ app.delete('/api/admin/reports/:id', async (c) => {
   return c.json({ ok: true })
 })
 
+function withPermitPhotoUrl(results: Record<string, unknown>[]) {
+  return results.map(({ photo_r2_key, ...rest }) => ({
+    ...rest,
+    photo_url: photo_r2_key ? `/api/permits/${rest.id}/photo` : null,
+  }))
+}
+
 app.get('/api/admin/permits/pending', async (c) => {
   const unauthorized = requireAdmin(c)
   if (unauthorized) return unauthorized
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM felling_permits WHERE review_status = 'pending' ORDER BY published_at DESC LIMIT 200`
   ).all()
-  return c.json(results)
+  return c.json(withPermitPhotoUrl(results as Record<string, unknown>[]))
 })
 
 // Already-live permits - mirrors /api/admin/reports/approved above, so the
 // admin page can list and (for a manual mistake or a since-retracted permit)
 // delete something that's already on the public map, not just review the
-// pending queue.
+// pending queue. LIMIT stays 200 (a moderation view, not meant to browse
+// the full ~500-row GRIB inventory one card at a time) - the public map
+// itself reads from /api/permits above, not this endpoint.
 app.get('/api/admin/permits/approved', async (c) => {
   const unauthorized = requireAdmin(c)
   if (unauthorized) return unauthorized
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM felling_permits WHERE review_status = 'approved' ORDER BY published_at DESC LIMIT 200`
   ).all()
-  return c.json(results)
+  return c.json(withPermitPhotoUrl(results as Record<string, unknown>[]))
 })
 
 app.post('/api/admin/permits/:id/review', async (c) => {
@@ -324,6 +359,11 @@ app.post('/api/admin/permits/:id/review', async (c) => {
 // the report edit endpoint.
 const EDITABLE_PERMIT_FIELDS = [
   'title', 'title_en', 'address', 'lat', 'lon', 'tree_count', 'species', 'reason', 'status', 'source_url',
+  // Added for the GRIB tree-by-tree inventory import (see
+  // POST /api/admin/inventory/import below) - editable by hand afterward
+  // the same way every other permit field already is.
+  'requires_permit', 'already_felled', 'species_nl', 'species_lat', 'species_en', 'neighborhood', 'reason_en',
+  'planted_year', 'age_years', 'trunk_diameter_class', 'height_class', 'tree_size_class', 'condition_nl', 'condition_en',
 ] as const
 
 app.patch('/api/admin/permits/:id', async (c) => {
@@ -402,12 +442,186 @@ app.post('/api/admin/permits', async (c) => {
   return c.json(row, 201)
 })
 
-// Permanent removal, mirroring the report delete endpoint above. Permits
-// have no R2 object to clean up alongside them.
+// Permanent removal, mirroring the report delete endpoint above. Cleans up
+// an R2 photo too, if this permit has one (only the GRIB inventory import
+// below ever sets photo_r2_key today, but this stays correct either way).
 app.delete('/api/admin/permits/:id', async (c) => {
   const unauthorized = requireAdmin(c)
   if (unauthorized) return unauthorized
-  await c.env.DB.prepare('DELETE FROM felling_permits WHERE id = ?').bind(c.req.param('id')).run()
+  const id = c.req.param('id')
+  const row = await c.env.DB.prepare('SELECT photo_r2_key FROM felling_permits WHERE id = ?')
+    .bind(id)
+    .first<{ photo_r2_key: string | null }>()
+  await c.env.DB.prepare('DELETE FROM felling_permits WHERE id = ?').bind(id).run()
+  if (row?.photo_r2_key) {
+    await c.env.PHOTOS.delete(row.photo_r2_key).catch(() => {})
+  }
+  return c.json({ ok: true })
+})
+
+// Batch Dutch->English translation, reused by the import script below to
+// translate the ~50 distinct arborist terms behind "Reden vellen" (reason
+// for felling) ONCE each rather than once per tree - 504 trees share only a
+// few dozen distinct reason phrases (dieback symptoms, fungal indicators,
+// structural defects), so translating the small distinct set and
+// reassembling client-side keeps this off the request path of the bulk
+// import itself (which stays pure SQL, no per-row AI calls, so it can't
+// time out a Worker's own request duration limit). Not tied to permits
+// specifically - any admin tool that needs a batch of short Dutch phrases
+// translated can reuse this.
+app.post('/api/admin/translate-batch', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const { texts } = await c.req.json<{ texts: string[] }>()
+  if (!Array.isArray(texts) || texts.length === 0) return c.json({ error: 'texts must be a non-empty array' }, 400)
+  if (texts.length > 100) return c.json({ error: 'max 100 texts per call' }, 400)
+  const results = await Promise.all(texts.map((t) => translateToEnglish(t, c.env.AI).catch(() => null)))
+  return c.json({ results })
+})
+
+// Tier 5: the Gemeente Delft / GRIB tree-by-tree felling inventory - a full
+// export from the same GRIB/Bomenwacht viewer the tier = 'manual' one-off
+// form above already targets (see that endpoint's own comment), but a
+// one-time bulk load of every tree in the current felling round rather than
+// a single hand-checked record. Stays tier = 'manual' (same orange-family
+// color on the map, same "Felling inventory" toggle) - entry_source is
+// what tells the two apart internally (and is what a future re-run of this
+// import should scope its replace-existing wipe to, so it never clobbers a
+// one-off record someone added by hand through the "+ Add by hand" form).
+// publication_id = `grib-${grib_id}` makes a re-import idempotent (upsert
+// on conflict) rather than duplicating every row on a second run.
+app.post('/api/admin/inventory/import', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const body = await c.req.json<{
+    records: Array<{
+      grib_id: string
+      lat: number
+      lon: number
+      species_nl: string | null
+      species_lat: string | null
+      species_en: string | null
+      address: string | null
+      neighborhood: string | null
+      requires_permit: boolean
+      already_felled: boolean
+      reason_nl: string | null
+      reason_en: string | null
+      published_at: string
+      planted_year: number | null
+      age_years: number | null
+      trunk_diameter_class: string | null
+      height_class: string | null
+      tree_size_class: string | null
+      condition_nl: string | null
+      condition_en: string | null
+    }>
+    wipeExisting?: boolean
+  }>()
+  const records = body.records
+  if (!Array.isArray(records) || records.length === 0) return c.json({ error: 'records must be a non-empty array' }, 400)
+
+  // Explicit one-time cleanup, requested directly: replace every existing
+  // Felling inventory (orange) record, not just this import's own rows -
+  // see this endpoint's header comment for why a future re-run should NOT
+  // default to this (it would also wipe any one-off "+ Add by hand" entry).
+  if (body.wipeExisting) {
+    await c.env.DB.prepare(`DELETE FROM felling_permits WHERE tier = 'manual'`).run()
+  }
+
+  const now = new Date().toISOString()
+  const statements = records.map((r) => {
+    const speciesLabel = r.species_nl ?? r.species_lat ?? 'Tree'
+    const speciesLabelEn = r.species_en ?? r.species_lat ?? 'Tree'
+    const place = r.address ?? r.neighborhood ?? 'Delft'
+    const title = `${speciesLabel} — ${place}`
+    const titleEn = `${speciesLabelEn} — ${place}`
+    const id = crypto.randomUUID()
+    return c.env.DB.prepare(
+      `INSERT INTO felling_permits (
+         id, publication_id, title, title_en, address, lat, lon, tree_count,
+         species, reason, status, tier, source_url, published_at,
+         review_status, created_at,
+         requires_permit, already_felled, species_nl, species_lat, species_en,
+         neighborhood, reason_en, entry_source,
+         planted_year, age_years, trunk_diameter_class, height_class, tree_size_class, condition_nl, condition_en
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 'aangevraagd', 'manual', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, 'grib_bulk', ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(publication_id) DO UPDATE SET
+         title = excluded.title, title_en = excluded.title_en, address = excluded.address,
+         lat = excluded.lat, lon = excluded.lon, species = excluded.species, reason = excluded.reason,
+         requires_permit = excluded.requires_permit, already_felled = excluded.already_felled,
+         species_nl = excluded.species_nl, species_lat = excluded.species_lat, species_en = excluded.species_en,
+         neighborhood = excluded.neighborhood, reason_en = excluded.reason_en,
+         planted_year = excluded.planted_year, age_years = excluded.age_years,
+         trunk_diameter_class = excluded.trunk_diameter_class, height_class = excluded.height_class,
+         tree_size_class = excluded.tree_size_class, condition_nl = excluded.condition_nl, condition_en = excluded.condition_en`
+    ).bind(
+      id,
+      `grib-${r.grib_id}`,
+      title,
+      titleEn,
+      r.address,
+      r.lat,
+      r.lon,
+      speciesLabel,
+      r.reason_nl,
+      'Gemeente Delft tree register (GRIB)',
+      r.published_at || now,
+      now,
+      r.requires_permit ? 1 : 0,
+      r.already_felled ? 1 : 0,
+      r.species_nl,
+      r.species_lat,
+      r.species_en,
+      r.neighborhood,
+      r.reason_en,
+      r.planted_year ?? null,
+      r.age_years ?? null,
+      r.trunk_diameter_class ?? null,
+      r.height_class ?? null,
+      r.tree_size_class ?? null,
+      r.condition_nl ?? null,
+      r.condition_en ?? null
+    )
+  })
+
+  // D1's batch() runs every statement even if inserted alongside others -
+  // chunked client-side (see the import script) to stay well under any
+  // single request's size/time budget rather than sending all ~500 at once.
+  await c.env.DB.batch(statements)
+
+  // Hand back the id D1 assigned to each grib_id (by publication_id) so the
+  // import script's next step - uploading each tree's photo - knows which
+  // row to attach it to without a second round-trip per record.
+  const publicationIds = records.map((r) => `grib-${r.grib_id}`)
+  const placeholders = publicationIds.map(() => '?').join(',')
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, publication_id FROM felling_permits WHERE publication_id IN (${placeholders})`
+  )
+    .bind(...publicationIds)
+    .all<{ id: string; publication_id: string }>()
+  const idByGribId: Record<string, string> = {}
+  for (const row of results) {
+    idByGribId[row.publication_id.replace(/^grib-/, '')] = row.id
+  }
+  return c.json({ ok: true, imported: records.length, ids: idByGribId })
+})
+
+// One tree's photo from the GRIB inventory import above - separate from the
+// bulk JSON import itself so a ~500-row insert never has to carry image
+// bytes through the same request. Mirrors POST /api/reports' photo handling
+// (multipart form, stored in the same PHOTOS bucket under its own key
+// prefix so it can never collide with a community report's own key).
+app.post('/api/admin/inventory/:id/photo', async (c) => {
+  const unauthorized = requireAdmin(c)
+  if (unauthorized) return unauthorized
+  const id = c.req.param('id')
+  const form = await c.req.formData()
+  const photo = form.get('photo')
+  if (!(photo instanceof File)) return c.json({ error: 'missing photo' }, 400)
+  const key = `inventory/${id}-${photo.name}`
+  await c.env.PHOTOS.put(key, await photo.arrayBuffer(), { httpMetadata: { contentType: photo.type } })
+  await c.env.DB.prepare('UPDATE felling_permits SET photo_r2_key = ? WHERE id = ?').bind(key, id).run()
   return c.json({ ok: true })
 })
 

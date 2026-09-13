@@ -32,11 +32,36 @@ CREATE TABLE IF NOT EXISTS felling_permits (
   species TEXT,
   reason TEXT,
   status TEXT NOT NULL,          -- 'aangevraagd' | 'verleend' | 'definitief' | 'geweigerd'
-  tier TEXT NOT NULL,            -- 'tier2' | 'tier3'
+  tier TEXT NOT NULL,            -- 'tier2' | 'tier3' | 'manual'
   source_url TEXT NOT NULL,
   published_at TEXT NOT NULL,
   review_status TEXT NOT NULL DEFAULT 'approved', -- 'approved' | 'rejected' -- auto-approved on sync: Tier 2/3 comes from an official government feed, not the public, so there's nothing to moderate before it goes live. 'rejected' stays available to hide an individual bad record by hand if one ever shows up.
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+
+  -- Tier 5 additions (the GRIB/Bomenwacht tree-by-tree felling inventory
+  -- import, api/src/index.ts's POST /api/admin/inventory/import) - also
+  -- used by a plain tier='manual' one-off record added via /admin, which
+  -- simply leaves all of these null.
+  requires_permit INTEGER,       -- 1 = "Kapvergunningsplichtig", 0 = "Geen kapvergunningsplicht" (GRIB's own permit-required flag, independent of `status` above)
+  already_felled INTEGER,        -- 1 if GRIB's own survey found the tree already gone ("Boom niet aanwezig" or "Alleen stobbe aanwezig" - not present, or stump only) at the time it was recorded
+  species_nl TEXT,
+  species_lat TEXT,
+  species_en TEXT,
+  neighborhood TEXT,             -- Buurt (falling back to Wijk)
+  reason_en TEXT,                -- best-effort translation of `reason` above, done once per distinct phrase via POST /api/admin/translate-batch at import time (not per row, per Workers AI/MyMemory - see that endpoint's own comment)
+  photo_r2_key TEXT,             -- set via POST /api/admin/inventory/:id/photo - re-hosted in R2 rather than ever linking the source GRIB viewer's own (access-code-gated) photo URL directly
+  entry_source TEXT,             -- 'admin_manual' (the /admin "+ Add by hand" form) | 'grib_bulk' (this bulk import) - lets a future re-import's "replace existing" step target only its own previous rows
+
+  -- Tier 5 size/condition detail (GRIB's own field survey) - added after the
+  -- first bulk import, see migrate_2026_09_13_inventory_details.sql. Left
+  -- null for anything not from the GRIB bulk import.
+  planted_year INTEGER,          -- Plantjaar
+  age_years INTEGER,             -- Leeftijd (jr, per 2026) - GRIB's own snapshot age, not recomputed from planted_year
+  trunk_diameter_class TEXT,     -- Stamdiameterklasse, e.g. "50-100 cm"
+  height_class TEXT,             -- Hoogteklasse, e.g. "12-18 m"
+  tree_size_class TEXT,          -- Boomgrootte, translated (e.g. "1st size class (large)")
+  condition_nl TEXT,             -- Conditie, original Dutch (e.g. "Onvoldoende")
+  condition_en TEXT              -- Conditie, translated (e.g. "Insufficient")
 );
 
 -- Tier 4: public tree reports ("Witness a Tree") - mirrors the
