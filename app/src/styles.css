@@ -863,3 +863,92 @@ body {
 }
 .map-layers-panel .layer-row { margin-bottom: 8px; }
 .map-layers-panel .layer-row:last-child { margin-bottom: 0; }
+
+/* Photo lightbox: a single shared full-screen overlay (see TreeMap.tsx's
+   ensureLightbox), opened by clicking any .lightbox-trigger photo in a
+   popup. Kept as one instance appended to <body> rather than per-popup
+   markup, since a popup's DOM is thrown away on every setHTML() call. */
+.lightbox-trigger {
+  cursor: pointer;
+}
+.photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 19, 15, 0.92);
+}
+.photo-lightbox-img {
+  max-width: min(92vw, 1100px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.photo-lightbox-close,
+.photo-lightbox-prev,
+.photo-lightbox-next {
+  position: absolute;
+  border: none;
+  background: rgba(251, 250, 245, 0.12);
+  color: var(--paper);
+  font-size: 1.6rem;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+.photo-lightbox-close:hover,
+.photo-lightbox-prev:hover,
+.photo-lightbox-next:hover {
+  background: rgba(251, 250, 245, 0.24);
+}
+.photo-lightbox-close {
+  top: 16px;
+  right: 16px;
+}
+.photo-lightbox-prev {
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.photo-lightbox-next {
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.photo-lightbox-counter {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--paper);
+  font-size: 0.78rem;
+  font-family: "Inter", sans-serif;
+  background: rgba(23, 19, 15, 0.5);
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+/* Community-report popup: thumbnail strip for photos beyond the first
+   (see reportPopupHtml in TreeMap.tsx). */
+.tree-popup-photo-strip {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 8px;
+  flex-wrap: wrap;
+}
+.tree-popup-photo-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}

@@ -149,6 +149,11 @@ type Report = {
   felled_period?: string
   notes?: string
   photo_url: string
+  // All photos in order, photo_url itself first - see the multi-photo
+  // upload support in ReportWizard.tsx/api/src/index.ts. Optional so a
+  // stale cached response from before this field existed still degrades
+  // to the single-photo behavior reportPopupHtml falls back to.
+  photo_urls?: string[]
   created_at?: string
 }
 
@@ -239,6 +244,104 @@ function dotElement(color: string, isSatellite: boolean, zoom: number): HTMLDivE
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!)
+}
+
+// --- Photo lightbox --------------------------------------------------------
+//
+// One overlay shared by every popup that has a photo (report and inventory
+// popups today - trees have none), appended straight to <body> rather than
+// built per-popup, since a popup's own DOM gets thrown away on every
+// setHTML() call. Ready for more than one photo per report (see
+// reportPopupHtml's photo_urls) - prev/next + a counter, not just an
+// enlarge.
+let lightboxEl: HTMLDivElement | null = null
+let lightboxImgEl: HTMLImageElement | null = null
+let lightboxCounterEl: HTMLDivElement | null = null
+let lightboxPhotos: string[] = []
+let lightboxIndex = 0
+
+function renderLightbox() {
+  if (!lightboxImgEl || !lightboxCounterEl) return
+  lightboxImgEl.src = lightboxPhotos[lightboxIndex] ?? ''
+  const multi = lightboxPhotos.length > 1
+  lightboxCounterEl.textContent = multi ? `${lightboxIndex + 1} / ${lightboxPhotos.length}` : ''
+  lightboxCounterEl.style.display = multi ? '' : 'none'
+}
+
+function closeLightbox() {
+  if (lightboxEl) lightboxEl.style.display = 'none'
+}
+
+function showLightboxDelta(delta: number) {
+  if (!lightboxPhotos.length) return
+  lightboxIndex = (lightboxIndex + delta + lightboxPhotos.length) % lightboxPhotos.length
+  renderLightbox()
+}
+
+function ensureLightbox(): void {
+  if (lightboxEl) return
+  const el = document.createElement('div')
+  el.className = 'photo-lightbox'
+  el.style.display = 'none'
+  el.innerHTML = `
+    <button type="button" class="photo-lightbox-close" aria-label="Close">&times;</button>
+    <button type="button" class="photo-lightbox-prev" aria-label="Previous photo">&#8249;</button>
+    <img class="photo-lightbox-img" alt="" />
+    <button type="button" class="photo-lightbox-next" aria-label="Next photo">&#8250;</button>
+    <div class="photo-lightbox-counter"></div>
+  `
+  // Clicking the dark backdrop (the lightbox element itself, not one of
+  // its children) closes it - the image and nav buttons have their own
+  // listeners below, each stopping propagation so a click on them doesn't
+  // also trigger this one.
+  el.addEventListener('click', (e) => {
+    if (e.target === el) closeLightbox()
+  })
+  el.querySelector('.photo-lightbox-close')!.addEventListener('click', closeLightbox)
+  el.querySelector('.photo-lightbox-prev')!.addEventListener('click', (e) => {
+    e.stopPropagation()
+    showLightboxDelta(-1)
+  })
+  el.querySelector('.photo-lightbox-next')!.addEventListener('click', (e) => {
+    e.stopPropagation()
+    showLightboxDelta(1)
+  })
+  document.body.appendChild(el)
+  lightboxEl = el
+  lightboxImgEl = el.querySelector('.photo-lightbox-img')
+  lightboxCounterEl = el.querySelector('.photo-lightbox-counter')
+
+  document.addEventListener('keydown', (e) => {
+    if (!lightboxEl || lightboxEl.style.display === 'none') return
+    if (e.key === 'Escape') closeLightbox()
+    else if (e.key === 'ArrowLeft') showLightboxDelta(-1)
+    else if (e.key === 'ArrowRight') showLightboxDelta(1)
+  })
+}
+
+function openLightbox(photos: string[], startIndex: number) {
+  if (!photos.length) return
+  ensureLightbox()
+  lightboxPhotos = photos
+  lightboxIndex = ((startIndex % photos.length) + photos.length) % photos.length
+  renderLightbox()
+  if (lightboxEl) lightboxEl.style.display = 'flex'
+}
+
+// Wires every `.lightbox-trigger` photo inside a just-opened popup - each
+// one carries the same `data-photos` (a JSON array shared by the whole
+// group) and its own `data-index` into that array. Has to be called again
+// after any setHTML() on the same popup (species lookup resolving, etc.),
+// same as every other popup-button wiring in this file - setHTML() replaces
+// the DOM wholesale and drops previously attached listeners with it.
+function wireLightboxTriggers(container: Element | null | undefined) {
+  container?.querySelectorAll<HTMLElement>('.lightbox-trigger').forEach((el) => {
+    el.addEventListener('click', () => {
+      const photos = JSON.parse(el.dataset.photos ?? '[]') as string[]
+      const index = Number(el.dataset.index ?? '0')
+      openLightbox(photos, index)
+    })
+  })
 }
 
 // --- Species lookup (Wikidata) ------------------------------------------
@@ -528,7 +631,7 @@ function inventoryPopupHtml(
       : '—'
 
   const photoHtml = p.photo_url
-    ? `<img class="inventory-popup-photo" src="${p.photo_url}" alt="${escapeHtml(String(heading))}" />`
+    ? `<img class="inventory-popup-photo lightbox-trigger" src="${p.photo_url}" alt="${escapeHtml(String(heading))}" data-photos='${escapeHtml(JSON.stringify([p.photo_url]))}' data-index="0" />`
     : ''
 
   const permitValue = p.requires_permit ? 'Yes — permit required' : 'No — no permit needed'
@@ -591,6 +694,26 @@ const FELLING_REASON_LABEL: Record<string, string> = {
 // permit, community report) read as one consistent system - every row
 // always appears, whether or not that particular report has that field.
 function reportPopupHtml(r: Report, nearestTree?: Tree | null): string {
+  // photo_urls (multi-photo upload support) always includes the primary
+  // photo - r.photo_url itself - first; falls back to a single-item array
+  // for anything fetched before that field existed. First photo renders at
+  // the existing full-width size, any rest as a row of small thumbnails
+  // below it - all of them open the same lightbox, just at a different
+  // starting index.
+  const photos = r.photo_urls && r.photo_urls.length ? r.photo_urls : [r.photo_url]
+  const photosJson = escapeHtml(JSON.stringify(photos))
+  const photoHtml =
+    `<img class="tree-popup-photo lightbox-trigger" src="${photos[0]}" alt="Submitted photo" data-photos='${photosJson}' data-index="0" />` +
+    (photos.length > 1
+      ? `<div class="tree-popup-photo-strip">${photos
+          .slice(1)
+          .map(
+            (url, i) =>
+              `<img class="tree-popup-photo-thumb lightbox-trigger" src="${url}" alt="Submitted photo ${i + 2}" data-photos='${photosJson}' data-index="${i + 1}" />`
+          )
+          .join('')}</div>`
+      : '')
+
   const row = (label: string, value: string | number | null | undefined) =>
     `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
 
@@ -616,7 +739,7 @@ function reportPopupHtml(r: Report, nearestTree?: Tree | null): string {
 
   return `
     <div class="tree-popup tree-popup-wide">
-      <img class="tree-popup-photo" src="${r.photo_url}" alt="Submitted photo" />
+      ${photoHtml}
       <h3>${STATUS_LABEL[r.status]}</h3>
       ${row('Quantity', r.quantity ? QUANTITY_LABEL[r.quantity] ?? r.quantity : null)}
       ${row('Species', speciesValue)}
@@ -1010,12 +1133,14 @@ export default function TreeMap({
         // above, just triggered by 'open' instead of a canvas layer click.
         let speciesLookupStarted = false
         popup.on('open', () => {
+          wireLightboxTriggers(popup.getElement())
           wireNearestTreeButton()
           if (p.species_lat && !speciesLookupStarted) {
             speciesLookupStarted = true
             lookupSpeciesInfo(p.species_lat).then((info) => {
               if (!popup.isOpen()) return
               popup.setHTML(inventoryPopupHtml(p, info, false, nearestStandingTree))
+              wireLightboxTriggers(popup.getElement())
               wireNearestTreeButton()
             })
           }
@@ -1041,25 +1166,27 @@ export default function TreeMap({
         // doesn't exist until it's actually opened (these are markers,
         // not the immediately-added popups the tree click handler uses),
         // so wiring happens on the 'open' event rather than right away.
-        if (nearestTree) {
-          reportPopup.on('open', () => {
-            reportPopup
-              .getElement()
-              ?.querySelector('.tree-popup-original-btn')
-              ?.addEventListener('click', () => {
-                const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
-                  .setLngLat([nearestTree.lon, nearestTree.lat])
-                  .setHTML(treePopupHtml(nearestTree, null, !!nearestTree.species_nl))
-                  .addTo(map)
-                if (nearestTree.species_nl) {
-                  lookupSpeciesInfo(nearestTree.species_nl).then((info) => {
-                    if (!treePopup.isOpen()) return
-                    treePopup.setHTML(treePopupHtml(nearestTree, info, false))
-                  })
-                }
-              })
-          })
-        }
+        // Registered unconditionally (not just when nearestTree exists) so
+        // the photo lightbox trigger below always gets wired too.
+        reportPopup.on('open', () => {
+          wireLightboxTriggers(reportPopup.getElement())
+          if (!nearestTree) return
+          reportPopup
+            .getElement()
+            ?.querySelector('.tree-popup-original-btn')
+            ?.addEventListener('click', () => {
+              const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+                .setLngLat([nearestTree.lon, nearestTree.lat])
+                .setHTML(treePopupHtml(nearestTree, null, !!nearestTree.species_nl))
+                .addTo(map)
+              if (nearestTree.species_nl) {
+                lookupSpeciesInfo(nearestTree.species_nl).then((info) => {
+                  if (!treePopup.isOpen()) return
+                  treePopup.setHTML(treePopupHtml(nearestTree, info, false))
+                })
+              }
+            })
+        })
         const marker = new maplibregl.Marker({ element: dotElement('#c33a26', isSatellite, map.getZoom()) }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
           .setPopup(reportPopup)
