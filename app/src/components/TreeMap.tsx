@@ -108,6 +108,17 @@ type Permit = {
   published_at?: string | null
   source_url?: string | null
   tier?: string | null
+  // Populated only for a GRIB tree-by-tree inventory row (see
+  // api/src/index.ts's POST /api/admin/inventory/import) - null/undefined
+  // for Tier 2/3 and a plain one-off "+ Add by hand" record.
+  requires_permit?: number | null
+  already_felled?: number | null
+  species_nl?: string | null
+  species_lat?: string | null
+  species_en?: string | null
+  neighborhood?: string | null
+  reason_en?: string | null
+  photo_url?: string | null
 }
 type Report = {
   id: string
@@ -174,6 +185,20 @@ function dotElement(color: string, isSatellite: boolean): HTMLDivElement {
   // trees-circle layer's own satellite-aware stroke below.
   el.style.border = isSatellite ? '2px solid #17130f' : '2px solid #fbfaf5'
   el.style.boxShadow = '0 1px 3px rgba(23,19,15,0.45)'
+  // These dot markers sit visually on top of the map canvas, but a DOM
+  // click event still bubbles up through the map container after it fires
+  // here - and MapLibre's own click handler on the 'trees-circle' layer
+  // (registered on the map/canvas, not on this element) then runs a
+  // separate hit-test at the same pixel. Wherever an inventory/permit/report
+  // dot sits at (or very near) a community tree point, that meant BOTH
+  // popups opened - the marker's own popup, then the tree popup right after
+  // it, which (per registerPopup's "only one open at a time" rule) instantly
+  // closed the marker's popup again, so clicking the orange/yellow/red dot
+  // always seemed to show the green tree underneath instead. Stopping
+  // propagation here keeps the click from ever reaching that layer's
+  // handler, without affecting the marker's own built-in popup-toggle
+  // listener (also bound to this same element, so it still fires normally).
+  el.addEventListener('click', (e) => e.stopPropagation())
   return el
 }
 
@@ -422,6 +447,46 @@ function permitPopupHtml(p: Permit): string {
   `
 }
 
+// One tree from the GRIB/Bomenwacht tree-by-tree felling inventory (see
+// api/src/index.ts's POST /api/admin/inventory/import) - distinct from
+// permitPopupHtml above because this dataset is structured per-tree rather
+// than one scraped announcement sentence: a real photo (rotated to
+// portrait at import time so the whole tree fits the frame - see that
+// import step's own notes), species in three languages, and a permit-
+// required flag that's independent of the felling reason. Same fixed-row,
+// em-dash-for-missing spec-sheet convention as the other two popups.
+function inventoryPopupHtml(p: Permit): string {
+  const row = (label: string, value: string | number | null | undefined) =>
+    `<div class="tree-popup-row"><span>${label}</span><strong>${value != null && value !== '' ? escapeHtml(String(value)) : '—'}</strong></div>`
+
+  const heading = p.species_en ?? p.species_nl ?? 'Unspecified species'
+  const photoHtml = p.photo_url
+    ? `<img class="inventory-popup-photo" src="${p.photo_url}" alt="${escapeHtml(heading)}" />`
+    : ''
+
+  const permitValue = p.requires_permit ? 'Yes — permit required' : 'No — no permit needed'
+  const statusValue = p.already_felled ? 'Already felled (recorded as gone or stump-only)' : 'Standing'
+  const reasonHtml = p.reason_en
+    ? `<div class="tree-popup-row"><span>Reason for felling</span><strong>${escapeHtml(p.reason_en)}</strong></div>
+       <div class="tree-popup-original">${escapeHtml(p.reason ?? '')}</div>`
+    : row('Reason for felling', p.reason)
+
+  return `
+    <div class="tree-popup tree-popup-wide">
+      ${photoHtml}
+      <h3>${escapeHtml(heading)}</h3>
+      ${row('Dutch name', p.species_nl)}
+      ${row('Scientific name', p.species_lat)}
+      ${row('Permit required', permitValue)}
+      ${row('Status', statusValue)}
+      ${reasonHtml}
+      ${row('Address', p.address)}
+      ${row('Neighborhood', p.neighborhood)}
+      ${row('Source', 'Gemeente Delft tree register (GRIB)')}
+    </div>
+  `
+}
+
 const QUANTITY_LABEL: Record<string, string> = {
   single: 'Single tree',
   few: 'A few (2-5)',
@@ -505,6 +570,9 @@ export default function TreeMap({
     reports: number
     permitTreeTotal: number
     inventoryTreeTotal: number
+    inventoryRequiresPermit: number
+    inventoryNoPermit: number
+    inventoryAlreadyFelled: number
   }) => void
   onReportTree?: (lat: number, lon: number) => void
   onReportsChange?: (reports: ReportSummary[]) => void
@@ -614,6 +682,12 @@ export default function TreeMap({
     const manualPermits = permits.filter((p) => p.tier === 'manual')
     const sumTrees = (list: Permit[]) =>
       list.reduce((sum, p) => (typeof p.tree_count === 'number' ? sum + p.tree_count : sum), 0)
+    // Sub-breakdown within Felling inventory - see the marker-color comment
+    // above for what each bucket means. Only ever non-zero for the GRIB
+    // import (a plain "+ Add by hand" record has requires_permit/
+    // already_felled left null, so it falls out of all three here - same
+    // as it not counting toward inventoryTreeTotal above).
+    const stillStanding = manualPermits.filter((p) => !p.already_felled)
     onCounts?.({
       trees: trees.length,
       permits: officialPermits.length,
@@ -621,6 +695,9 @@ export default function TreeMap({
       reports: reports.length,
       permitTreeTotal: sumTrees(officialPermits),
       inventoryTreeTotal: sumTrees(manualPermits),
+      inventoryRequiresPermit: stillStanding.filter((p) => p.requires_permit).length,
+      inventoryNoPermit: stillStanding.filter((p) => !p.requires_permit).length,
+      inventoryAlreadyFelled: manualPermits.filter((p) => p.already_felled).length,
     })
   }, [trees, permits, reports, onCounts])
 
@@ -762,20 +839,34 @@ export default function TreeMap({
     markersRef.current = []
     const isSatellite = !!map.getSource('esri-satellite')
 
-    // Felling permits (yellow, tier2/tier3) and Felling inventory (orange,
-    // tier === 'manual') are independently toggleable layers - each permit
-    // is gated by its own layer's flag rather than one shared 'permits'
-    // toggle, so hiding one doesn't hide the other. Keep colors in sync
-    // with --yellow/--orange in styles.css.
+    // Felling permits (yellow, tier2/tier3) and Felling inventory (orange
+    // family, tier === 'manual') are independently toggleable layers - each
+    // permit is gated by its own layer's flag rather than one shared
+    // 'permits' toggle, so hiding one doesn't hide the other. Within Felling
+    // inventory, a tree already recorded as gone (already_felled - GRIB's
+    // own survey found it not present or stump-only) gets the same red used
+    // for a community "already felled" report rather than either orange
+    // shade, since visually it's the same fact as a felled report. Of the
+    // ones still standing, permit-required gets the darker orange and
+    // no-permit-needed gets the lighter one - both still just one
+    // "Felling inventory" toggle. Keep colors in sync with
+    // --yellow/--orange/--orange-light/--red in styles.css.
     permits.forEach((p) => {
       if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
       const isManual = p.tier === 'manual'
       if (isManual ? !layers.inventory : !layers.permits) return
-      const marker = new maplibregl.Marker({
-        element: dotElement(isManual ? '#d9772b' : '#e2b93d', isSatellite),
-      })
+      const isGribInventory = isManual && !!p.species_nl
+      let color = '#e2b93d' // yellow: Tier 2/3 auto-scraped permit
+      if (isManual) {
+        color = p.already_felled ? '#c33a26' : p.requires_permit ? '#d9772b' : '#f0b072'
+      }
+      const marker = new maplibregl.Marker({ element: dotElement(color, isSatellite) })
         .setLngLat([p.lon, p.lat])
-        .setPopup(registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p)))
+        .setPopup(
+          registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
+            isGribInventory ? inventoryPopupHtml(p) : permitPopupHtml(p)
+          )
+        )
         .addTo(map)
       markersRef.current.push(marker)
     })
