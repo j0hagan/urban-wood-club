@@ -97,11 +97,42 @@ const REPORT_COLUMNS = `
 // (arborist_contact is deliberately excluded from the public read - it's
 // only meant for whoever picks up the "looking for an arborist" flag)
 
+// Attaches a `photo_urls` array to each report - r.photo_url (the existing
+// primary photo, "photo 0") first, then any rows from
+// tree_report_extra_photos in upload order. Every report gets an array
+// (length 1 when there are no extras) so the frontend never has to special-
+// case the single-photo shape.
+async function attachExtraPhotoUrls(
+  db: D1Database,
+  reports: Record<string, unknown>[]
+): Promise<Record<string, unknown>[]> {
+  if (reports.length === 0) return reports
+  const ids = reports.map((r) => r.id as string)
+  const placeholders = ids.map(() => '?').join(',')
+  const { results: extras } = await db
+    .prepare(
+      `SELECT id, report_id FROM tree_report_extra_photos WHERE report_id IN (${placeholders}) ORDER BY report_id, position`
+    )
+    .bind(...ids)
+    .all()
+  const byReport = new Map<string, string[]>()
+  for (const row of extras as { id: string; report_id: string }[]) {
+    const list = byReport.get(row.report_id) ?? []
+    list.push(`/api/reports/${row.report_id}/extra-photo/${row.id}`)
+    byReport.set(row.report_id, list)
+  }
+  return reports.map((r) => ({
+    ...r,
+    photo_urls: [r.photo_url as string, ...(byReport.get(r.id as string) ?? [])],
+  }))
+}
+
 app.get('/api/reports', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT ${REPORT_COLUMNS} FROM tree_reports WHERE review_status = 'approved' ORDER BY created_at DESC LIMIT 500`
   ).all()
-  return c.json((results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` })))
+  const withPhotos = (results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` }))
+  return c.json(await attachExtraPhotoUrls(c.env.DB, withPhotos))
 })
 
 app.get('/api/reports/:id/photo', async (c) => {
@@ -111,6 +142,21 @@ app.get('/api/reports/:id/photo', async (c) => {
     .first<{ photo_r2_key: string }>()
   if (!row) return c.notFound()
   const obj = await c.env.PHOTOS.get(row.photo_r2_key)
+  if (!obj) return c.notFound()
+  return new Response(obj.body, {
+    headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream' },
+  })
+})
+
+// Extra (beyond the primary) photos for a report - same shape/behavior as
+// /api/reports/:id/photo above, just keyed by the extra photo's own id too
+// so a stale/foreign photoId can't be used to fetch a different report's photo.
+app.get('/api/reports/:id/extra-photo/:photoId', async (c) => {
+  const row = await c.env.DB.prepare('SELECT r2_key FROM tree_report_extra_photos WHERE id = ? AND report_id = ?')
+    .bind(c.req.param('photoId'), c.req.param('id'))
+    .first<{ r2_key: string }>()
+  if (!row) return c.notFound()
+  const obj = await c.env.PHOTOS.get(row.r2_key)
   if (!obj) return c.notFound()
   return new Response(obj.body, {
     headers: { 'content-type': obj.httpMetadata?.contentType ?? 'application/octet-stream' },
@@ -146,6 +192,8 @@ app.post('/api/reports', async (c) => {
     httpMetadata: { contentType: photo.type },
   })
 
+  const reportId = crypto.randomUUID()
+
   await c.env.DB.prepare(
     `INSERT INTO tree_reports (
        id, lat, lon, photo_r2_key, status, quantity,
@@ -158,7 +206,7 @@ app.post('/api/reports', async (c) => {
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`
   )
     .bind(
-      crypto.randomUUID(),
+      reportId,
       lat,
       lon,
       key,
@@ -181,6 +229,29 @@ app.post('/api/reports', async (c) => {
       new Date().toISOString()
     )
     .run()
+
+  // Extra photos beyond the primary one above (multi-photo upload support -
+  // see the "Additional photos" field in ReportWizard.tsx). Each becomes
+  // its own R2 object plus a tree_report_extra_photos row recording upload
+  // order; failures here are logged but don't fail the submission, since
+  // the primary photo and report record are already saved.
+  const extraPhotos = form.getAll('extra_photos').filter((v): v is File => v instanceof File)
+  for (let i = 0; i < extraPhotos.length; i++) {
+    try {
+      const extraPhoto = extraPhotos[i]
+      const extraKey = `reports/${crypto.randomUUID()}-${extraPhoto.name}`
+      await c.env.PHOTOS.put(extraKey, await extraPhoto.arrayBuffer(), {
+        httpMetadata: { contentType: extraPhoto.type },
+      })
+      await c.env.DB.prepare(
+        `INSERT INTO tree_report_extra_photos (id, report_id, r2_key, position, created_at) VALUES (?, ?, ?, ?, ?)`
+      )
+        .bind(crypto.randomUUID(), reportId, extraKey, i, new Date().toISOString())
+        .run()
+    } catch (err) {
+      console.error('extra photo upload failed:', err instanceof Error ? err.message : String(err))
+    }
+  }
 
   // Best-effort email notification via Resend's HTTP API (api.resend.com) -
   // never lets a failed/unconfigured send break the actual report
@@ -247,7 +318,8 @@ app.get('/api/admin/reports/pending', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM tree_reports WHERE review_status = 'pending' ORDER BY created_at DESC LIMIT 200`
   ).all()
-  return c.json((results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` })))
+  const withPhotos = (results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` }))
+  return c.json(await attachExtraPhotoUrls(c.env.DB, withPhotos))
 })
 
 // Already-live reports - so the admin page can list what's currently on
@@ -258,7 +330,8 @@ app.get('/api/admin/reports/approved', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM tree_reports WHERE review_status = 'approved' ORDER BY created_at DESC LIMIT 200`
   ).all()
-  return c.json((results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` })))
+  const withPhotos = (results as Record<string, unknown>[]).map((r) => ({ ...r, photo_url: `/api/reports/${r.id}/photo` }))
+  return c.json(await attachExtraPhotoUrls(c.env.DB, withPhotos))
 })
 
 app.post('/api/admin/reports/:id/review', async (c) => {
@@ -305,9 +378,16 @@ app.delete('/api/admin/reports/:id', async (c) => {
   const row = await c.env.DB.prepare('SELECT photo_r2_key FROM tree_reports WHERE id = ?')
     .bind(id)
     .first<{ photo_r2_key: string | null }>()
+  const { results: extras } = await c.env.DB.prepare('SELECT r2_key FROM tree_report_extra_photos WHERE report_id = ?')
+    .bind(id)
+    .all<{ r2_key: string }>()
+  await c.env.DB.prepare('DELETE FROM tree_report_extra_photos WHERE report_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM tree_reports WHERE id = ?').bind(id).run()
   if (row?.photo_r2_key) {
     await c.env.PHOTOS.delete(row.photo_r2_key).catch(() => {})
+  }
+  for (const extra of extras) {
+    await c.env.PHOTOS.delete(extra.r2_key).catch(() => {})
   }
   return c.json({ ok: true })
 })

@@ -106,6 +106,19 @@ CREATE INDEX IF NOT EXISTS idx_permits_review ON felling_permits(review_status);
 CREATE INDEX IF NOT EXISTS idx_trees_source ON trees(source);
 CREATE INDEX IF NOT EXISTS idx_reports_review ON tree_reports(review_status);
 
+-- Extra photos for a tree_reports row beyond the primary photo_r2_key -
+-- see migrate_2026_09_13_report_extra_photos.sql for the remote-DB
+-- migration and its rationale.
+CREATE TABLE IF NOT EXISTS tree_report_extra_photos (
+  id TEXT PRIMARY KEY,
+  report_id TEXT NOT NULL REFERENCES tree_reports(id),
+  r2_key TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_extra_photos_report ON tree_report_extra_photos(report_id);
+
 -- simple key/value table for tracking ingestion watermarks (e.g. last SRU run date)
 CREATE TABLE IF NOT EXISTS ingestion_state (
   key TEXT PRIMARY KEY,

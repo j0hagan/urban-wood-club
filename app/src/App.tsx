@@ -257,6 +257,9 @@ export default function App() {
     body.set('felled_date', form.felledDate)
     body.set('felled_period', form.felledPeriod)
     body.set('notes', form.notes)
+    for (const extraPhoto of form.extraPhotos) {
+      body.append('extra_photos', extraPhoto)
+    }
 
     const res = await fetch('/api/reports', { method: 'POST', body })
     if (!res.ok) throw new Error(`Submit failed (${res.status})`)

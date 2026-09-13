@@ -11,6 +11,12 @@ type FellingReason = 'diseased' | 'storm_damaged' | 'infrastructure' | 'building
 
 export interface ReportFormState {
   photo: File | null
+  // Optional photos beyond the primary one above - see the "Additional
+  // photos" upload in step 1 below. Submitted alongside `photo` as
+  // extra_photos in App.tsx's submitReport(), stored server-side in
+  // tree_report_extra_photos (see api/src/index.ts and
+  // api/src/db/migrate_2026_09_13_report_extra_photos.sql).
+  extraPhotos: File[]
   status: Status
   quantity: Quantity
   speciesKnown: boolean
@@ -31,6 +37,7 @@ export interface ReportFormState {
 
 export const emptyReportForm: ReportFormState = {
   photo: null,
+  extraPhotos: [],
   status: 'marked_for_felling',
   quantity: 'single',
   speciesKnown: false,
@@ -154,6 +161,39 @@ export default function ReportWizard({
             </div>
             {form.photo && (
               <img className="photo-preview" src={URL.createObjectURL(form.photo)} alt="Preview of the reported tree" />
+            )}
+
+            <h2 className="wizard-subheading">Additional photos (optional)</h2>
+            <div className="capture-row">
+              <label className="capture-btn">
+                Add Photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) patch({ extraPhotos: [...form.extraPhotos, file] })
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+            </div>
+            {form.extraPhotos.length > 0 && (
+              <div className="extra-photo-strip">
+                {form.extraPhotos.map((file, i) => (
+                  <div className="extra-photo-thumb-wrap" key={i}>
+                    <img className="extra-photo-thumb" src={URL.createObjectURL(file)} alt={`Additional photo ${i + 1}`} />
+                    <button
+                      type="button"
+                      className="extra-photo-remove"
+                      aria-label="Remove photo"
+                      onClick={() => patch({ extraPhotos: form.extraPhotos.filter((_, j) => j !== i) })}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </>
         )}
