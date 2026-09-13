@@ -490,6 +490,89 @@ function findNearestTree(lat: number, lon: number, trees: Tree[]): Tree | null {
   return best && bestDist <= NEAREST_TREE_MAX_METERS ? best : null
 }
 
+// --- Chain navigation (prev/next across related records on one tree) ------
+//
+// Everything within NEAREST_TREE_MAX_METERS of a given point - the Tier 1
+// standing tree, any felling permit/inventory record, and any community
+// report - is one "chain": clicking through it answers a request like "this
+// community report says a tree marked for felling is now felled, show me
+// the felling permit and the original tree too" without piecing it together
+// across separate one-hop links. Order is tree first, then permits/
+// inventory, then community reports (each of the latter two groups oldest-
+// first when a created_at exists) - not always strictly chronological (the
+// auto-scraped permit feed has no created_at), but a stable, sensible read
+// order regardless. Superflous "see the original tree"/"see the nearest
+// standing tree" single-hop buttons this replaces are gone from
+// inventoryPopupHtml/reportPopupHtml's own params below - the chain nav
+// covers that same ground and more.
+type ChainItem =
+  | { kind: 'tree'; tree: Tree }
+  | { kind: 'permit'; permit: Permit }
+  | { kind: 'report'; report: Report }
+
+function chainItemLatLon(item: ChainItem): [number, number] {
+  if (item.kind === 'tree') return [item.tree.lon, item.tree.lat]
+  if (item.kind === 'permit') return [item.permit.lon as number, item.permit.lat as number]
+  return [item.report.lon, item.report.lat]
+}
+
+function buildChain(lat: number, lon: number, trees: Tree[], permits: Permit[], reports: Report[]): ChainItem[] {
+  const items: ChainItem[] = []
+  const tree = findNearestTree(lat, lon, trees)
+  if (tree) items.push({ kind: 'tree', tree })
+  const nearbyPermits = permits.filter(
+    (p) => p.lat != null && p.lon != null && distanceMeters(lat, lon, p.lat, p.lon) <= NEAREST_TREE_MAX_METERS
+  )
+  for (const permit of nearbyPermits) items.push({ kind: 'permit', permit })
+  const nearbyReports = reports
+    .filter((r) => distanceMeters(lat, lon, r.lat, r.lon) <= NEAREST_TREE_MAX_METERS)
+    .sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''))
+  for (const report of nearbyReports) items.push({ kind: 'report', report })
+  return items
+}
+
+// Small footer appended to a popup's content whenever its chain has more
+// than one member - prev/next like a photo gallery, plus a 2/3-style
+// counter (see .tree-popup-chain-nav in styles.css; wireChainNav below
+// wires the two buttons after every render, same "setHTML() drops
+// listeners" reason as wireLightboxTriggers).
+function chainNavHtml(index: number, total: number): string {
+  if (total <= 1) return ''
+  return `
+    <div class="tree-popup-chain-nav">
+      <button type="button" class="tree-popup-chain-prev" aria-label="Previous record on this tree">&#8249;</button>
+      <span class="tree-popup-chain-counter">${index + 1} / ${total} on this tree</span>
+      <button type="button" class="tree-popup-chain-next" aria-label="Next record on this tree">&#8250;</button>
+    </div>`
+}
+
+// Renders one chain item using its own existing popup-HTML builder -
+// nearestTree/nearestStandingTree are always passed null now that the
+// chain nav footer above covers that same "see the related record" ground
+// (see the ChainItem comment). isGribInventory mirrors the exact same
+// check the permit marker loop below uses to choose inventoryPopupHtml
+// over permitPopupHtml for a manual felling-inventory record.
+function popupHtmlForChainItem(item: ChainItem, info?: SpeciesInfo | null, loadingInfo?: boolean): string {
+  if (item.kind === 'tree') return treePopupHtml(item.tree, info, loadingInfo)
+  if (item.kind === 'permit') {
+    const isGribInventory = item.permit.tier === 'manual' && !!item.permit.species_nl
+    return isGribInventory ? inventoryPopupHtml(item.permit, info, loadingInfo, null) : permitPopupHtml(item.permit)
+  }
+  return reportPopupHtml(item.report, null)
+}
+
+// The Wikidata lookup key for a chain item, mirroring each popup type's
+// own existing species check (treePopupHtml keys off species_nl,
+// inventoryPopupHtml off species_lat) - null means no lookup applies
+// (a plain permit with no GRIB species data, and every community report).
+function chainItemSpeciesKey(item: ChainItem): string | null {
+  if (item.kind === 'tree') return item.tree.species_nl ?? null
+  if (item.kind === 'permit') {
+    return item.permit.tier === 'manual' && item.permit.species_nl ? (item.permit.species_lat ?? null) : null
+  }
+  return null
+}
+
 // The popup shows a fixed field list (species header, English/Dutch common
 // name, planted year, height, diameter, neighborhood, coordinates,
 // Wikipedia links) - deliberately not every column the API returns, to
@@ -811,6 +894,56 @@ export default function TreeMap({
     })
     return popup
   }
+
+  // Renders one chain item (see ChainItem/buildChain above) into an
+  // already-created, already-registered popup - repositioning it
+  // (setLngLat) and swapping its content (setHTML) to match, rather than
+  // opening a new floating popup per hop, so the marker's own click-to-
+  // toggle keeps working against one stable Popup instance throughout.
+  // Wires every interactive bit inside the new content the same way every
+  // other popup in this file already has to after any setHTML() call
+  // (lightbox triggers, the tree popup's "Report this tree" button, and
+  // here also the chain's own prev/next), and kicks off that item's
+  // Wikidata lookup if it has one (chainItemSpeciesKey). `generation` is a
+  // per-popup counter bumped on every render so a slow lookup for a chain
+  // item the user has since navigated away from can't clobber whatever's
+  // now showing.
+  function renderChainPopup(popup: maplibregl.Popup, chain: ChainItem[], index: number, generation: { current: number }) {
+    const i = ((index % chain.length) + chain.length) % chain.length
+    const item = chain[i]
+    const [lon, lat] = chainItemLatLon(item)
+    const speciesKey = chainItemSpeciesKey(item)
+    popup.setLngLat([lon, lat]).setHTML(popupHtmlForChainItem(item, null, !!speciesKey) + chainNavHtml(i, chain.length))
+
+    const wire = () => {
+      wireLightboxTriggers(popup.getElement())
+      if (item.kind === 'tree') {
+        const tree = item.tree
+        popup
+          .getElement()
+          ?.querySelector('.tree-popup-report-btn')
+          ?.addEventListener('click', () => onReportTree?.(tree.lat, tree.lon))
+      }
+      popup
+        .getElement()
+        ?.querySelector('.tree-popup-chain-prev')
+        ?.addEventListener('click', () => renderChainPopup(popup, chain, i - 1, generation))
+      popup
+        .getElement()
+        ?.querySelector('.tree-popup-chain-next')
+        ?.addEventListener('click', () => renderChainPopup(popup, chain, i + 1, generation))
+    }
+    wire()
+
+    if (speciesKey) {
+      const myGen = ++generation.current
+      lookupSpeciesInfo(speciesKey).then((info) => {
+        if (!popup.isOpen() || generation.current !== myGen) return
+        popup.setHTML(popupHtmlForChainItem(item, info, false) + chainNavHtml(i, chain.length))
+        wire()
+      })
+    }
+  }
   const [mapLoaded, setMapLoaded] = useState(false)
   const [trees, setTrees] = useState<Tree[]>([])
   const [permits, setPermits] = useState<Permit[]>([])
@@ -824,6 +957,16 @@ export default function TreeMap({
   // comment for why re-registering them after every style swap would
   // stack up duplicate handlers instead of just resuming for free.
   const treeHandlersBoundRef = useRef(false)
+  // trees-circle's click handler (below) is registered once ever, guarded
+  // by treeHandlersBoundRef above - so its closure can't just read
+  // `permits`/`reports` from component scope, that would freeze them at
+  // whatever those were on the very first bind and never see a later
+  // report/permit added after a refetch. These refs give it (and the
+  // permit/report marker loops, for the same "always read current data"
+  // reason when building a chain) a live view instead.
+  const treesRef = useRef<Tree[]>([])
+  const permitsRef = useRef<Permit[]>([])
+  const reportsRef = useRef<Report[]>([])
 
   // map init (once)
   useEffect(() => {
@@ -894,6 +1037,20 @@ export default function TreeMap({
     fetch('/api/permits').then((r) => r.json()).then(setPermits).catch(() => setPermits([]))
     fetch('/api/reports').then((r) => r.json()).then(setReports).catch(() => setReports([]))
   }, [refreshKey])
+
+  // Keep treesRef/permitsRef/reportsRef (see their declaration above) in
+  // sync with the state they mirror, so the once-ever trees-circle click
+  // handler and the chain-building in the permit/report marker loop below
+  // always read current data.
+  useEffect(() => {
+    treesRef.current = trees
+  }, [trees])
+  useEffect(() => {
+    permitsRef.current = permits
+  }, [permits])
+  useEffect(() => {
+    reportsRef.current = reports
+  }, [reports])
 
   // surface item counts to the parent, so the sidebar can show a count
   // beside each layer's toggle. permitTreeTotal sums each permit's own
@@ -1019,35 +1176,22 @@ export default function TreeMap({
         if (!feature || feature.geometry.type !== 'Point') return
         const tree = feature.properties as Tree
 
-        // setHTML() replaces the popup's innerHTML wholesale, which drops any
-        // listener bound to a previous render - so the "Report this tree"
-        // button has to be rewired after every setHTML() call, not just once.
-        const wireReportButton = () => {
-          popup
-            .getElement()
-            ?.querySelector('.tree-popup-report-btn')
-            ?.addEventListener('click', () => onReportTree?.(tree.lat, tree.lon))
-        }
+        // Chain nav (see ChainItem/buildChain/renderChainPopup above) is
+        // built from the refs, not the trees/permits/reports state
+        // directly - this handler is bound once ever (treeHandlersBoundRef
+        // below) so its own closure would otherwise freeze those at
+        // whatever they were on the very first bind.
+        const chain = buildChain(tree.lat, tree.lon, treesRef.current, permitsRef.current, reportsRef.current)
+        const chainIndex = Math.max(
+          chain.findIndex((item) => item.kind === 'tree' && item.tree.id === tree.id),
+          0
+        )
 
         // Default maplibre popups cap out at 240px wide - too narrow for the
         // now-doubled .tree-popup-wide layout, so this one gets an explicit
         // wider cap.
-        const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
-          .setLngLat(feature.geometry.coordinates as [number, number])
-          .setHTML(treePopupHtml(tree, null, !!tree.species_nl))
-          .addTo(map)
-        wireReportButton()
-
-        // Show what we already have instantly, then fill in the English/Dutch
-        // common names + Wikipedia links once the Wikidata lookup resolves -
-        // no reason to make the click wait on a network round-trip.
-        if (tree.species_nl) {
-          lookupSpeciesInfo(tree.species_nl).then((info) => {
-            if (!popup.isOpen()) return
-            popup.setHTML(treePopupHtml(tree, info, false))
-            wireReportButton()
-          })
-        }
+        const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).addTo(map)
+        renderChainPopup(popup, chain, chainIndex, { current: 0 })
       })
     }
     // styleVersion: re-run after every setStyle() (the satellite toggle),
@@ -1087,67 +1231,23 @@ export default function TreeMap({
       if (p.lat == null || p.lon == null) return // not geocoded yet - still in the moderation queue
       const isManual = p.tier === 'manual'
       if (isManual ? !layers.inventory : !layers.permits) return
-      const isGribInventory = isManual && !!p.species_nl
       let color = '#e2b93d' // yellow: Tier 2/3 auto-scraped permit
       if (isManual) {
         color = p.already_felled ? '#c33a26' : p.requires_permit ? '#d9772b' : '#f0b072'
       }
-      let popup: maplibregl.Popup
-      if (isGribInventory) {
-        // Same "nearest tree within 20m" cross-link reportPopupHtml already
-        // uses for a felled community report, applied the other direction -
-        // only worth computing for a tree this record itself says is gone.
-        const nearestStandingTree = p.already_felled ? findNearestTree(p.lat, p.lon, trees) : null
-        popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
-          inventoryPopupHtml(p, null, !!p.species_lat, nearestStandingTree)
-        )
-        const wireNearestTreeButton = () => {
-          if (!nearestStandingTree) return
-          popup
-            .getElement()
-            ?.querySelector('.tree-popup-original-btn')
-            ?.addEventListener('click', () => {
-              const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
-                .setLngLat([nearestStandingTree.lon, nearestStandingTree.lat])
-                .setHTML(treePopupHtml(nearestStandingTree, null, !!nearestStandingTree.species_nl))
-                .addTo(map)
-              if (nearestStandingTree.species_nl) {
-                lookupSpeciesInfo(nearestStandingTree.species_nl).then((info) => {
-                  if (!treePopup.isOpen()) return
-                  treePopup.setHTML(treePopupHtml(nearestStandingTree, info, false))
-                })
-              }
-            })
-        }
-        // The species lookup only ever starts once this specific popup is
-        // actually opened (guarded by speciesLookupStarted so re-opening the
-        // same popup doesn't re-fire it) - NOT eagerly for all ~500 markers
-        // on page load. An earlier version called lookupSpeciesInfo() (and
-        // the popup.setHTML() that applied its result) unconditionally right
-        // after creating every marker: that fired ~500 concurrent Wikidata
-        // requests on every page load, and updating a popup's HTML before it
-        // had ever been opened left MapLibre's Popup instance in a state
-        // where it could no longer be opened at all by a later click -
-        // exactly the "only green popups work" regression this replaced.
-        // Mirrors the trees-circle click handler's own on-demand pattern
-        // above, just triggered by 'open' instead of a canvas layer click.
-        let speciesLookupStarted = false
-        popup.on('open', () => {
-          wireLightboxTriggers(popup.getElement())
-          wireNearestTreeButton()
-          if (p.species_lat && !speciesLookupStarted) {
-            speciesLookupStarted = true
-            lookupSpeciesInfo(p.species_lat).then((info) => {
-              if (!popup.isOpen()) return
-              popup.setHTML(inventoryPopupHtml(p, info, false, nearestStandingTree))
-              wireLightboxTriggers(popup.getElement())
-              wireNearestTreeButton()
-            })
-          }
-        })
-      } else {
-        popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(permitPopupHtml(p))
-      }
+      // Chain nav (see ChainItem/buildChain/renderChainPopup above) covers
+      // every permit/inventory record's own popup rendering, species lookup
+      // and lightbox wiring - it only actually renders once the popup is
+      // opened, and resets back to this record (not wherever chain nav last
+      // left it) on every reopen, since chainIndex is fixed per marker.
+      const chain = buildChain(p.lat, p.lon, trees, permits, reports)
+      const chainIndex = Math.max(
+        chain.findIndex((item) => item.kind === 'permit' && item.permit === p),
+        0
+      )
+      const generation = { current: 0 }
+      const popup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+      popup.on('open', () => renderChainPopup(popup, chain, chainIndex, generation))
       const marker = new maplibregl.Marker({ element: dotElement(color, isSatellite, map.getZoom()) })
         .setLngLat([p.lon, p.lat])
         .setPopup(popup)
@@ -1157,36 +1257,18 @@ export default function TreeMap({
 
     if (layers.reports) {
       reports.forEach((r) => {
-        const nearestTree = r.status === 'felled' ? findNearestTree(r.lat, r.lon, trees) : null
-        const reportPopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' })).setHTML(
-          reportPopupHtml(r, nearestTree)
+        // Chain nav (see ChainItem/buildChain/renderChainPopup above) covers
+        // this report's own popup rendering and lightbox wiring - resets
+        // back to this record (not wherever chain nav last left it) on
+        // every reopen, since chainIndex is fixed per marker.
+        const chain = buildChain(r.lat, r.lon, trees, permits, reports)
+        const chainIndex = Math.max(
+          chain.findIndex((item) => item.kind === 'report' && item.report === r),
+          0
         )
-        // Same "wire it after every render" need as the tree popup's
-        // "Report this tree" button above - and here the popup's DOM
-        // doesn't exist until it's actually opened (these are markers,
-        // not the immediately-added popups the tree click handler uses),
-        // so wiring happens on the 'open' event rather than right away.
-        // Registered unconditionally (not just when nearestTree exists) so
-        // the photo lightbox trigger below always gets wired too.
-        reportPopup.on('open', () => {
-          wireLightboxTriggers(reportPopup.getElement())
-          if (!nearestTree) return
-          reportPopup
-            .getElement()
-            ?.querySelector('.tree-popup-original-btn')
-            ?.addEventListener('click', () => {
-              const treePopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
-                .setLngLat([nearestTree.lon, nearestTree.lat])
-                .setHTML(treePopupHtml(nearestTree, null, !!nearestTree.species_nl))
-                .addTo(map)
-              if (nearestTree.species_nl) {
-                lookupSpeciesInfo(nearestTree.species_nl).then((info) => {
-                  if (!treePopup.isOpen()) return
-                  treePopup.setHTML(treePopupHtml(nearestTree, info, false))
-                })
-              }
-            })
-        })
+        const generation = { current: 0 }
+        const reportPopup = registerPopup(new maplibregl.Popup({ maxWidth: '480px' }))
+        reportPopup.on('open', () => renderChainPopup(reportPopup, chain, chainIndex, generation))
         const marker = new maplibregl.Marker({ element: dotElement('#c33a26', isSatellite, map.getZoom()) }) // keep in sync with --red
           .setLngLat([r.lon, r.lat])
           .setPopup(reportPopup)

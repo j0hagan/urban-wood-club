@@ -652,6 +652,41 @@ body {
 }
 .tree-popup-original-btn:hover { background: var(--green); color: var(--paper); }
 
+/* Prev/next nav between related records within 20m of one another (tree,
+   felling permit/inventory entry, community report) - see ChainItem /
+   buildChain / renderChainPopup in TreeMap.tsx. */
+.tree-popup-chain-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e4ddcc;
+}
+.tree-popup-chain-prev,
+.tree-popup-chain-next {
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid #cfc6ae;
+  background: var(--paper);
+  color: #4a4536;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.tree-popup-chain-prev:hover,
+.tree-popup-chain-next:hover { background: #4a4536; color: var(--paper); border-color: #4a4536; }
+.tree-popup-chain-counter {
+  font-size: 0.72rem;
+  color: #6b6355;
+  text-align: center;
+  flex: 1;
+}
+
 
 /* sidebar: always-visible feed of community reports (above "Report a tree") */
 .report-feed {
