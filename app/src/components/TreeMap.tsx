@@ -244,20 +244,20 @@ function dotElement(color: string, isSatellite: boolean, zoom: number): HTMLDivE
   // it too.
   el.style.border = isSatellite ? '1px solid #17130f' : '1px solid #fbfaf5'
   el.style.boxShadow = '0 1px 3px rgba(23,19,15,0.45)'
-  // These dot markers sit visually on top of the map canvas, but a DOM
-  // click event still bubbles up through the map container after it fires
-  // here - and MapLibre's own click handler on the 'trees-circle' layer
-  // (registered on the map/canvas, not on this element) then runs a
-  // separate hit-test at the same pixel. Wherever an inventory/permit/report
-  // dot sits at (or very near) a community tree point, that meant BOTH
-  // popups opened - the marker's own popup, then the tree popup right after
-  // it, which (per registerPopup's "only one open at a time" rule) instantly
-  // closed the marker's popup again, so clicking the orange/yellow/red dot
-  // always seemed to show the green tree underneath instead. Stopping
-  // propagation here keeps the click from ever reaching that layer's
-  // handler, without affecting the marker's own built-in popup-toggle
-  // listener (also bound to this same element, so it still fires normally).
-  el.addEventListener('click', (e) => e.stopPropagation())
+  // These dot markers sit visually on top of the map canvas, but a maplibre
+  // Marker's own click-to-open-popup behavior isn't a listener bound to
+  // this element at all - it's implemented by the Marker registering a
+  // *generic* map.on('click', ...) handler that checks whether the click's
+  // original target fell inside its own element. That's the same
+  // registration style the 'trees-circle' layer's own map.on('click',
+  // 'trees-circle', ...) handler below uses, so both read from the one
+  // underlying native click event - which means calling
+  // e.stopPropagation() here (an earlier attempt to stop a click on a dot
+  // sitting over a tree from ALSO opening that tree's popup) silently broke
+  // the marker's own popup-toggle for every dot, not just the overlapping
+  // ones. The 'trees-circle' handler below now guards against this itself
+  // (bailing out when the click hit a marker), so nothing needs to be
+  // stopped here.
   return el
 }
 
@@ -1191,6 +1191,16 @@ export default function TreeMap({
       map.on('mouseenter', 'trees-circle', () => (map.getCanvas().style.cursor = 'pointer'))
       map.on('mouseleave', 'trees-circle', () => (map.getCanvas().style.cursor = ''))
       map.on('click', 'trees-circle', (e) => {
+        // A permit/inventory/report dot sitting at (or very near) a
+        // community tree point overlaps this layer's own hit-test area, so
+        // a click meant for that dot could also match a tree feature here.
+        // Bail out when the click actually landed on a marker element (see
+        // dotElement() above) and let that marker's own popup-toggle - a
+        // separate map.on('click', ...) registration reading the same
+        // native event - handle it instead, rather than this handler
+        // racing it to open the wrong popup.
+        const target = e.originalEvent.target as HTMLElement | null
+        if (target?.closest('.maplibregl-marker')) return
         const feature = e.features?.[0]
         if (!feature || feature.geometry.type !== 'Point') return
         const tree = feature.properties as Tree
