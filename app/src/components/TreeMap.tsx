@@ -230,6 +230,12 @@ function dotElement(color: string, isSatellite: boolean, zoom: number): HTMLDivE
   el.style.height = `${diameter}px`
   el.style.borderRadius = '50%'
   el.style.background = color
+  // Unlike the trees-circle GL layer (which gets its pointer cursor via a
+  // mouseenter/mouseleave pair on the canvas below), this is a plain DOM
+  // element sitting over the map - it just inherits the map container's own
+  // default "grab" cursor unless told otherwise, which read as broken/
+  // unclickable even though clicking it worked fine.
+  el.style.cursor = 'pointer'
   // A white ring reads fine against the flat CARTO map style but disappears
   // (or looks washed-out) against real aerial photography - switch to a
   // dark ink ring over satellite imagery instead, same idea as the
