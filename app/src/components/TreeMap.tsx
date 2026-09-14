@@ -189,9 +189,10 @@ const PERMIT_STATUS_LABEL: Record<string, string> = {
 // for the handful of permit/report pins on screen at once.
 // Same zoom -> radius breakpoints as the trees-circle layer's own
 // circle-radius paint property below, so the DOM-element permit/inventory/
-// report dots end up the same visual size as the green circle-layer trees
-// at every zoom level instead of sitting fixed-size and looking oversized
-// whenever you zoom out.
+// report dots scale at every zoom level the same way the green circle-layer
+// trees do (instead of sitting fixed-size and looking oversized whenever you
+// zoom out) - PERMIT_REPORT_DOT_SCALE below then bumps them a bit past that
+// baseline size.
 const DOT_RADIUS_STOPS: [number, number][] = [
   [10, 2],
   [14, 3.2],
@@ -210,9 +211,21 @@ function dotRadiusForZoom(zoom: number): number {
   return last[1]
 }
 
+// dotElement() is only ever used for permit/inventory/report markers (green
+// trees are the separate trees-circle GL layer, not a DOM marker) - and per
+// feedback that they were getting lost against the sea of green tree dots
+// and were fiddly to click precisely, they're sized a bit larger than the
+// green circles rather than an exact match. 1.35x keeps the same relative
+// growth across zoom levels since it's applied on top of dotRadiusForZoom().
+const PERMIT_REPORT_DOT_SCALE = 1.35
+
+function permitReportDotDiameterForZoom(zoom: number): number {
+  return dotRadiusForZoom(zoom) * 2 * PERMIT_REPORT_DOT_SCALE
+}
+
 function dotElement(color: string, isSatellite: boolean, zoom: number): HTMLDivElement {
   const el = document.createElement('div')
-  const diameter = dotRadiusForZoom(zoom) * 2
+  const diameter = permitReportDotDiameterForZoom(zoom)
   el.style.width = `${diameter}px`
   el.style.height = `${diameter}px`
   el.style.borderRadius = '50%'
@@ -1007,7 +1020,7 @@ export default function TreeMap({
     // dotRadiusForZoom() above uses the exact same breakpoints as that
     // layer's paint property.
     map.on('zoom', () => {
-      const diameter = dotRadiusForZoom(map.getZoom()) * 2
+      const diameter = permitReportDotDiameterForZoom(map.getZoom())
       for (const marker of markersRef.current) {
         const el = marker.getElement()
         el.style.width = `${diameter}px`
